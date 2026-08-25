@@ -142,7 +142,9 @@ The Android workflow at `.github/workflows/android.yml` needs a push with the
 
 1. Refresh the token scope with `gh auth refresh -h github.com -s workflow`, or
    restore SSH access.
-2. Push the commit that adds `.github/workflows/android.yml`.
+2. Run `git push origin android`. Two commits stay on the branch until the
+   scope is correct. They add `.github/workflows/android.yml` and
+   `.github/workflows/identity.yml`.
 3. Create the upload keystore. Keep it forever, and keep a backup off the
    machine.
 
