@@ -135,6 +135,23 @@ keystroke and shows a chip for each field that the parser found.
 - A schema change destroys the local database and pulls it again. Send the
   outbox before an upgrade that changes the schema.
 
+## Known defects
+
+A review on 2026-08-26 read every source against the Go server contract. It
+found nine defects. Six are fixed. These five are open, and none of them loses
+data.
+
+| # | Defect | Effect |
+|---|---|---|
+| 1 | A capture from the tile starts a sync that `finish()` then cancels | The capture waits for the next app launch. The uuid dedupe covers the resend, so nothing is lost. The fix needs an application-scoped coroutine. |
+| 2 | The encrypted preference file and the database open on the main thread | Keystore work and file input happen before the first frame. StrictMode reports it, and a slow device can show an ANR. |
+| 3 | A label whose name holds a comma splits into two labels on the phone | Display only. The quick add parser cannot make such a name, but the MCP server and the importer can. |
+| 4 | A 401 shows the same message as a network failure | Nothing points the user at the settings screen to fix the token. |
+| 5 | The outbox orders by a millisecond stamp alone | Two commands stamped in the same millisecond can be sent in either order. Unproven, and the identifier is already sortable, so it is a ready tie-break. |
+
+Fix these before the first release. Read the fix commit for the six that were
+closed, because each one names the failure it prevents.
+
 ## Before the first build
 
 The Android workflow at `.github/workflows/android.yml` needs a push with the
