@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>teha — sign in</title>
+<style>
+:root{--bg:#f6f7f3;--card:#fff;--ink:#1c221d;--ink-3:#7a827c;--line:#d8dcd2;--accent:#2f6b4f}
+@media (prefers-color-scheme:dark){:root{--bg:#131714;--card:#1b201c;--ink:#e7eae4;--ink-3:#7f877f;--line:#2b322c;--accent:#7fc49b}}
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+form{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:26px;width:min(360px,92vw);display:grid;gap:12px}
+h1{margin:0;font-size:17px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent)}
+p{margin:0;color:var(--ink-3);font-size:14px}
+input,button{font:inherit;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+button{background:var(--accent);color:var(--bg);border:none;font-weight:600;cursor:pointer}
+.err{color:#c8412f;font-size:14px}
+</style>
+</head>
+<body>
+<form method="POST" action="/login">
+  <h1>teha</h1>
+  <p>This build uses one device token. Passkeys arrive in a later milestone.</p>
+  <input type="password" name="token" placeholder="Device token" autofocus autocomplete="current-password">
+  <button type="submit">Sign in</button>
+  <p class="err" id="err"></p>
+</form>
+<script>
+if (location.search.includes('bad=1')) document.getElementById('err').textContent = 'That token did not match.';
+</script>
+</body>
+</html>

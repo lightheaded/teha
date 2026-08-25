@@ -1,0 +1,22 @@
+# Litestream v0.5.16 configuration.
+#
+# The 0.5 line replicates one database to one replica. Litestream expands
+# ${VAR} from the environment, so this file holds no endpoint, no bucket name
+# and no credential.
+#
+# Litestream reads LITESTREAM_ACCESS_KEY_ID and LITESTREAM_SECRET_ACCESS_KEY
+# from the environment without a reference here.
+
+dbs:
+  - path: /data/teha.db
+    replica:
+      type: s3
+      endpoint: ${LITESTREAM_ENDPOINT}
+      bucket: ${LITESTREAM_BUCKET}
+      path: ${LITESTREAM_PATH}
+      # Most S3-compatible services need the path style instead of a
+      # bucket subdomain. Set this to false for AWS S3 itself.
+      force-path-style: true
+      # No tuning key is set here. The 0.5 line compacts with the LTX format
+      # and its own level schedule. Read the Litestream documentation for the
+      # version in use before you add a retention or an interval key.

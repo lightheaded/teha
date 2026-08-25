@@ -1,0 +1,28 @@
+# Build output
+/teha
+/dist/
+
+# Database files
+*.db
+*.db-wal
+*.db-shm
+
+# Local configuration
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+
+# Coverage
+coverage.out
+coverage.html
+*.test
+
+# Editor and operating system files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~

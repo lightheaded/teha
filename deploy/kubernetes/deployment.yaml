@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: teha
+spec:
+  # One replica only. SQLite allows one writer, and the volume is
+  # ReadWriteOnce.
+  replicas: 1
+  # Recreate stops the old pod before the new pod starts, so two pods never
+  # hold the same database file.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: teha
+      app.kubernetes.io/component: server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: teha
+        app.kubernetes.io/component: server
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: teha
+          image: teha:dev
+          args: ["serve"]
+          ports:
+            - name: http
+              containerPort: 8637
+              protocol: TCP
+          env:
+            - name: TEHA_ADDR
+              value: 0.0.0.0:8637
+            - name: TEHA_DB
+              value: /data/teha.db
+            - name: TEHA_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: teha
+                  key: TEHA_TOKEN
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            privileged: false
+            capabilities:
+              drop:
+                - ALL
+          livenessProbe:
+            httpGet:
+              path: /v1/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /v1/health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+      # A Litestream sidecar goes here in the private repository. It mounts the
+      # same data volume and reads deploy/litestream.yml. See docs/DEPLOY.md.
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: teha-data
+        # The root filesystem is read-only, so temporary files need a volume.
+        - name: tmp
+          emptyDir: {}

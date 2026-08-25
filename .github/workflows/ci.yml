@@ -1,0 +1,109 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          # The action caches the module and build caches from go.sum.
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Build
+        env:
+          CGO_ENABLED: 0
+        run: go build -trimpath -ldflags "-s -w" -o teha ./cmd/teha
+
+      - name: Check the formatting
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "gofmt found unformatted files:"
+            echo "$out"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Go tests
+        run: go test ./...
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Parser tests
+        run: node --test internal/webui/assets/parse.test.mjs
+
+  docker:
+    runs-on: ubuntu-latest
+    # The test job gates the image. A build that fails the corpus must never
+    # reach the registry, because the cluster pulls by tag from there.
+    needs: test
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Only a push to main publishes. A pull request builds and throws the
+      # result away, so a fork cannot write to the registry.
+      - name: Log in to the registry
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Work out the tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          # A commit tag is what deployment.yaml pins. `latest` exists for a
+          # local `docker run` and for nothing else.
+          tags: |
+            type=sha,format=long,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          # linux/amd64 only: the cluster is amd64. Add linux/arm64 here when a
+          # node needs it, and expect the build to take about three times longer.
+          platforms: linux/amd64
+          push: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
+          load: ${{ github.ref != 'refs/heads/main' || github.event_name != 'push' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Report the image
+        run: |
+          echo "tags:"
+          echo "${{ steps.meta.outputs.tags }}"

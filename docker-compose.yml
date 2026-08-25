@@ -1,0 +1,87 @@
+# teha plus a Litestream sidecar.
+#
+# 1. Write the variables into a file with the name .env, or export them in the
+#    shell. docs/DEPLOY.md lists every variable.
+# 2. Run: docker compose up -d
+#
+# Every value here is a placeholder. Put the real endpoint, the real bucket and
+# the real keys in .env, and keep .env out of the repository.
+
+services:
+  teha:
+    image: teha:dev
+    build:
+      context: .
+      args:
+        VERSION: ${VERSION:-dev}
+    restart: unless-stopped
+    environment:
+      # The container listens on every interface, because the port is published.
+      TEHA_ADDR: 0.0.0.0:8637
+      TEHA_DB: /data/teha.db
+      # A missing token makes the server print a new one on each start.
+      TEHA_TOKEN: ${TEHA_TOKEN:?set TEHA_TOKEN in .env}
+    ports:
+      - "127.0.0.1:8637:8637"
+    volumes:
+      - teha-data:/data
+    # The image declares the same probe. It is repeated here to keep the
+    # dependency of the sidecar readable.
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  litestream:
+    image: litestream/litestream:0.5.16
+    restart: unless-stopped
+    depends_on:
+      teha:
+        condition: service_healthy
+    command: ["replicate", "-config", "/etc/litestream.yml"]
+    environment:
+      # Litestream reads these two names on its own.
+      LITESTREAM_ACCESS_KEY_ID: ${LITESTREAM_ACCESS_KEY_ID:?set the access key in .env}
+      LITESTREAM_SECRET_ACCESS_KEY: ${LITESTREAM_SECRET_ACCESS_KEY:?set the secret key in .env}
+      # The config file reads these three names.
+      LITESTREAM_ENDPOINT: ${LITESTREAM_ENDPOINT:-https://s3.example.com}
+      LITESTREAM_BUCKET: ${LITESTREAM_BUCKET:-example-bucket}
+      LITESTREAM_PATH: ${LITESTREAM_PATH:-teha}
+    volumes:
+      - teha-data:/data
+      - ./deploy/litestream.yml:/etc/litestream.yml:ro
+
+volumes:
+  teha-data:
+
+# --- Restore from the backup ------------------------------------------------
+#
+# The restore writes a new database file. Never restore over a file that a
+# running server holds open.
+#
+# 1. Stop both services:
+#
+#      docker compose down
+#
+# 2. Restore the latest generation into the volume:
+#
+#      docker compose run --rm --entrypoint litestream litestream \
+#        restore -config /etc/litestream.yml -o /data/teha.db /data/teha.db
+#
+# 3. To restore an earlier point in time, add -timestamp with an RFC 3339 value:
+#
+#      docker compose run --rm --entrypoint litestream litestream \
+#        restore -config /etc/litestream.yml -timestamp 2026-08-25T12:00:00Z \
+#        -o /data/teha.db /data/teha.db
+#
+# 4. Start the services again:
+#
+#      docker compose up -d
+#
+# To list what the bucket holds, use the same pattern with the snapshots
+# subcommand:
+#
+#      docker compose run --rm --entrypoint litestream litestream \
+#        snapshots -config /etc/litestream.yml /data/teha.db

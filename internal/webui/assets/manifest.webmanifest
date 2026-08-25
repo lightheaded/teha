@@ -1,0 +1,12 @@
+{
+  "name": "teha",
+  "short_name": "teha",
+  "description": "Tasks for two people and one agent",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f7f3",
+  "theme_color": "#2f6b4f",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

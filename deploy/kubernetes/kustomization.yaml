@@ -1,0 +1,31 @@
+# A generic kustomize example for one teha instance.
+#
+#   kubectl apply -k deploy/kubernetes
+#
+# The Ingress, the IngressRoute and every hostname belong in the private
+# infrastructure repository. A hostname never appears in this repository.
+#
+# This example holds no overlay. Copy the directory into a private repository
+# and add the hostname, the TLS reference and the real secret there.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: teha
+
+commonLabels:
+  app.kubernetes.io/name: teha
+  app.kubernetes.io/component: server
+
+resources:
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+  # secret.example.yaml is a template. Do not apply it as it is. Replace it
+  # with a SOPS-encrypted secret, or with an external secret reference, in the
+  # private infrastructure repository.
+  # - secret.example.yaml
+
+images:
+  - name: teha
+    newTag: dev

@@ -1,0 +1,16 @@
+# The SQLite file and the attachments live on this volume.
+#
+# SQLite allows one writer, so the access mode is ReadWriteOnce and the
+# Deployment runs one replica.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: teha-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  # storageClassName is intentionally absent. The cluster default applies, or
+  # the private overlay sets the class.

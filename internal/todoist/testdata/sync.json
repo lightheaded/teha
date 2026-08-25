@@ -1,0 +1,42 @@
+{
+  "sync_token": "aBcD-recorded-token",
+  "full_sync": true,
+  "projects": [
+    {"id": "6001", "name": "Inbox", "color": "charcoal", "parent_id": null, "child_order": 0, "inbox_project": true, "is_deleted": false, "is_archived": false},
+    {"id": "6002", "name": "Home", "color": "green", "parent_id": null, "child_order": 1, "is_deleted": false, "is_archived": false},
+    {"id": "6003", "name": "Work", "color": "blue", "parent_id": null, "child_order": 2, "is_deleted": false, "is_archived": false},
+    {"id": "6004", "name": "Work follow-up", "color": "grey", "parent_id": "6003", "child_order": 1, "is_deleted": false, "is_archived": false},
+    {"id": "6005", "name": "Old trip", "color": "red", "parent_id": null, "child_order": 3, "is_deleted": false, "is_archived": true}
+  ],
+  "labels": [
+    {"id": "8001", "name": "errand", "color": "red", "item_order": 1, "is_deleted": false},
+    {"id": "8002", "name": "deep-work", "color": "blue", "item_order": 2, "is_deleted": false}
+  ],
+  "sections": [
+    {"id": "7001", "name": "Errands", "project_id": "6002", "is_deleted": false, "is_archived": false}
+  ],
+  "items": [
+    {"id": "5001", "project_id": "6001", "parent_id": null, "section_id": null, "content": "Read the plan", "description": "", "priority": 1, "child_order": 1, "labels": [], "due": null, "checked": false, "is_deleted": false, "added_at": "2026-08-20T10:00:00Z"},
+    {"id": "5002", "project_id": "6001", "parent_id": null, "section_id": null, "content": "Call the plumber", "description": "The tap in the kitchen drips.", "priority": 4, "child_order": 2, "labels": ["errand"], "due": {"date": "2026-09-01", "timezone": null, "string": "1 sep", "lang": "en", "is_recurring": false}, "checked": false, "is_deleted": false, "added_at": "2026-08-20T10:05:00Z"},
+    {"id": "5003", "project_id": "6002", "parent_id": null, "section_id": null, "content": "Take out the bins", "description": "", "priority": 2, "child_order": 1, "labels": [], "due": {"date": "2026-08-26", "timezone": null, "string": "every monday", "lang": "en", "is_recurring": true}, "checked": false, "is_deleted": false, "added_at": "2026-08-20T10:06:00Z"},
+    {"id": "5004", "project_id": "6002", "parent_id": null, "section_id": "7001", "content": "Water the plants", "description": "", "priority": 1, "child_order": 2, "labels": [], "due": {"date": "2026-08-27", "timezone": null, "string": "every 3 days", "lang": "en", "is_recurring": true}, "checked": false, "is_deleted": false, "added_at": "2026-08-20T10:07:00Z"},
+    {"id": "5005", "project_id": "6002", "parent_id": null, "section_id": "7001", "content": "Buy oat milk", "description": "", "priority": 1, "child_order": 3, "labels": ["errand"], "due": null, "checked": false, "is_deleted": false, "added_at": "2026-08-20T10:08:00Z"},
+    {"id": "5006", "project_id": "6003", "parent_id": null, "section_id": null, "content": "Write the report", "description": "Two pages, no more.", "priority": 3, "child_order": 1, "labels": ["deep-work"], "due": {"date": "2026-08-28T09:00:00", "timezone": null, "string": "28 aug at 09:00", "lang": "en", "is_recurring": false}, "deadline": {"date": "2026-08-31", "lang": "en"}, "duration": {"amount": 90, "unit": "minute"}, "checked": false, "is_deleted": false, "added_at": "2026-08-20T10:09:00Z"},
+    {"id": "5007", "project_id": "6003", "parent_id": "5006", "section_id": null, "content": "Collect the numbers", "description": "", "priority": 1, "child_order": 1, "labels": [], "due": null, "checked": false, "is_deleted": false, "added_at": "2026-08-20T10:10:00Z"},
+    {"id": "5008", "project_id": "6003", "parent_id": null, "section_id": null, "content": "Send the invoice", "description": "", "priority": 4, "child_order": 2, "labels": [], "due": {"date": "2026-08-21", "timezone": null, "string": "every friday", "lang": "en", "is_recurring": true}, "checked": true, "is_deleted": false, "completed_at": "2026-08-21T14:00:00Z", "added_at": "2026-08-20T10:11:00Z"},
+    {"id": "5009", "project_id": "6004", "parent_id": null, "section_id": null, "content": "Ask about the contract", "description": "", "priority": 2, "child_order": 1, "labels": [], "due": {"date": "2027-01-15", "timezone": null, "string": "every jan 15", "lang": "en", "is_recurring": true}, "checked": false, "is_deleted": false, "added_at": "2026-08-20T10:12:00Z"},
+    {"id": "5010", "project_id": "6001", "parent_id": null, "section_id": null, "content": "Pay the rent", "description": "", "priority": 4, "child_order": 3, "labels": [], "due": {"date": "2026-08-31", "timezone": null, "string": "every last day", "lang": "en", "is_recurring": true}, "checked": false, "is_deleted": false, "added_at": "2026-08-20T10:13:00Z"},
+    {"id": "5011", "project_id": "6002", "parent_id": null, "section_id": null, "content": "Clean the water filter", "description": "", "priority": 3, "child_order": 4, "labels": [], "due": {"date": "2026-09-05", "timezone": null, "string": "every! 2 months", "lang": "en", "is_recurring": true}, "checked": false, "is_deleted": false, "added_at": "2026-08-20T10:14:00Z"},
+    {"id": "5012", "project_id": "6003", "parent_id": null, "section_id": null, "content": "Plan the quarter", "description": "", "priority": 4, "child_order": 3, "labels": ["deep-work"], "due": {"date": "2026-08-30T13:00:00Z", "timezone": "Europe/Tallinn", "string": "30 aug at 16:00", "lang": "en", "is_recurring": false}, "checked": false, "is_deleted": false, "added_at": "2026-08-20T10:15:00Z"},
+    {"id": "5099", "project_id": "6002", "parent_id": null, "section_id": null, "content": "A task that was deleted", "description": "", "priority": 1, "child_order": 9, "labels": [], "due": null, "checked": false, "is_deleted": true, "added_at": "2026-08-19T10:00:00Z"}
+  ],
+  "notes": [
+    {"id": "9001", "item_id": "5002", "project_id": "6001", "content": "The number of the plumber is on the fridge.", "posted_at": "2026-08-21T08:00:00Z", "is_deleted": false}
+  ],
+  "project_notes": [
+    {"id": "9002", "project_id": "6003", "content": "This project holds the quarter plan.", "posted_at": "2026-08-21T09:00:00Z", "is_deleted": false}
+  ],
+  "completed_info": [
+    {"project_id": "6003", "completed_items": 7}
+  ]
+}
