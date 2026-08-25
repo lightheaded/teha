@@ -30,3 +30,17 @@ coverage.html
 # Screenshot job scratch
 .screenshots-teha
 .screenshots-check/
+
+# Android
+# The gomobile binding is a build output. CI produces it, and a committed
+# binary would drift from ./mobile without anyone noticing.
+android/app/libs/*.aar
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+.kotlin/
+
+# Signing material never enters the repository.
+*.jks
+*.keystore
