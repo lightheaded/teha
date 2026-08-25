@@ -90,6 +90,12 @@ AGPL-3.0-or-later, the server:
   docs              the plan, the decisions, the research and the deploy guide
 ```
 
+## Use it
+
+[docs/USAGE.md](docs/USAGE.md) is the guide: the server flags, the quick add
+syntax, the filter grammar, every command line subcommand, the MCP tools and
+the Todoist import. Every example in it was captured from a running server.
+
 ## Test
 
 ```sh
