@@ -46,6 +46,7 @@ func main() {
 		token   = flag.String("token", os.Getenv("TEHA_TOKEN"), "device token. An empty token in --dev mode turns auth off")
 		dev     = flag.Bool("dev", false, "development mode: no auth, verbose logs")
 		seed    = flag.Bool("seed", false, "write example data into an empty database and exit")
+		seedDay = flag.String("seed-date", "", "the day that seeded dates count from, as 2006-01-02. Empty means today. Used by the screenshot job, so that an unchanged screen produces an identical image on any day")
 		version = flag.Bool("version", false, "print the version and exit")
 	)
 	flag.Parse()
@@ -73,7 +74,16 @@ func main() {
 	defer st.Close()
 
 	if *seed {
-		if err := seedExample(st); err != nil {
+		var base time.Time
+		if *seedDay != "" {
+			var err error
+			base, err = time.Parse("2006-01-02", *seedDay)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "teha: -seed-date must be a day such as 2026-08-25: %v\n", err)
+				os.Exit(2)
+			}
+		}
+		if err := seedExample(st, base); err != nil {
 			log.Error("seed failed", "err", err)
 			os.Exit(1)
 		}

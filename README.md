@@ -6,6 +6,31 @@ the data.
 
 *teha* is Estonian for "to do".
 
+## What it looks like
+
+| | |
+|---|---|
+| ![The Today view](docs/screenshots/today-light.png) | ![The same view in the dark theme](docs/screenshots/today-dark.png) |
+| **Today.** Overdue first, then the day groups. The sidebar counts every view. | **The dark theme.** The app follows the system setting. |
+
+![Quick add, with the parse hint](docs/screenshots/quick-add.png)
+
+**Quick add tells you what it understood, before you press Enter.** One line
+carries the date, the time, the priority, the project and the labels. `#Trip`
+resolves to `Trip to Setomaa` by a unique prefix. The same parser runs on the
+server, in the browser and on the phone, against one shared corpus.
+
+| | |
+|---|---|
+| ![The task detail sheet](docs/screenshots/detail.png) | ![The app at phone width](docs/screenshots/phone.png) |
+| **Every field, one sheet.** Start date, deadline and duration are here, and none of them is behind a paid plan. | **Phone width.** The installed web app until the Android app ships. |
+
+These images are generated, never captured by hand. `scripts/screenshots.sh`
+builds the server, seeds it from a fixed date, and drives a browser inside a
+pinned container, so a laptop and a CI runner produce identical bytes. CI runs
+the same script with `--check` and fails when the committed images no longer
+match the app. A README here cannot go stale without the build going red.
+
 ## Why
 
 Todoist is the fastest way to put a thought into a list. It is also a closed

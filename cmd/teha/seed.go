@@ -12,8 +12,18 @@ import (
 
 // seedExample writes a small realistic tree, so the first run shows the app
 // with content instead of an empty list.
-func seedExample(st *store.Store) error {
-	today := time.Now()
+//
+// base fixes the day that every relative date counts from. A zero value means
+// today, which is what a first run wants. The screenshot job passes a fixed day
+// instead, because the app prints a weekday and a date on every row: with a
+// moving base the same unchanged screen produces a different image every day,
+// and the check that keeps the README current would fail on the calendar
+// rather than on a change to the app.
+func seedExample(st *store.Store, base time.Time) error {
+	today := base
+	if today.IsZero() {
+		today = time.Now()
+	}
 	day := func(n int) string { return today.AddDate(0, 0, n).Format("2006-01-02") }
 
 	type task struct {

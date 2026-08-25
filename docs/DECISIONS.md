@@ -168,3 +168,52 @@ contributors, and the shared packages stabilise enough that a published Go
 module version stops being a burden. Splitting later is cheap. `git filter-repo`
 extracts the directory with its history, and the shared packages are already
 importable, because D-001 moved them out of `internal/`.
+
+---
+
+## D-006 — README screenshots are generated and checked, never captured by hand
+
+**Date:** 2026-08-25 · **Status:** done
+
+`scripts/screenshots.sh` writes `docs/screenshots/*.png`. The README embeds
+them. CI runs the same script with `--check` and fails when the committed images
+no longer match the app.
+
+**Why.** A hand-captured screenshot rots. Someone changes a layout, nobody
+retakes the image, and the README quietly starts lying about the product. A
+reader cannot tell a current image from a two-year-old one. The only fix that
+holds is to make staleness fail the build.
+
+**Why a container, and why three pins.** The browser runs inside
+`mcr.microsoft.com/playwright`, pinned by digest tag, on `linux/amd64`. The
+Playwright package version and the seed date are pinned beside it. Without that,
+a font renders one pixel differently on a laptop and the check fails for a
+reason nobody can act on. A screenshot check that cries wolf gets ignored within
+a week, and then it is worse than nothing. lugu learned the same lesson from
+Roborazzi: a baseline recorded on macOS never pixel-matches `ubuntu-latest`, and
+it keeps a container recipe for exactly this reason.
+
+**Three things are frozen**, because each one would otherwise change an image
+that nobody edited:
+
+- the seeded data, through the `-seed-date` flag added for this
+- the browser clock, so that "today" agrees with the seeded data
+- the locale and the time zone, so that a date reads the same everywhere
+
+**Verified, not assumed.** Two consecutive runs produce byte-identical files.
+Changing one accent colour makes four of the five images differ and the check
+exit non-zero. Reverting it makes the check pass again.
+
+**Cost.** About two minutes of CI on a change to the web app, and a developer
+must run one command and commit five files after a visual change. The job is
+path-filtered, so a server-only change does not pay it. A weekly scheduled run
+catches drift from an upstream rebuild of the browser image, rather than letting
+it surface inside somebody's unrelated pull request.
+
+**Reverses if:** the images stop earning their place, or the app gains a
+screen whose content cannot be made deterministic.
+
+**Applies to lugu as well.** lugu already produces screenshots through Roborazzi
+and shows none of them in its README. The same rule belongs there: publish the
+canonical Roborazzi outputs and let the existing verify-by-default run keep them
+honest.
