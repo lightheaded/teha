@@ -49,7 +49,7 @@ class Settings(context: Context) {
                     EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                     EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
                 )
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 // A damaged hardware keystore makes the encrypted file
                 // unreadable for good. A crash here locks the user out of the
                 // app, so the file is dropped and the user types the token
