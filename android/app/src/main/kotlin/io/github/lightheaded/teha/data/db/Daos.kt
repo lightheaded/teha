@@ -40,6 +40,11 @@ interface TaskDao {
     )
     fun allOpen(): Flow<List<TaskEntity>>
 
+    // Used when the server refuses a task_add. The row exists nowhere else, so
+    // no later pull can remove it.
+    @Query("DELETE FROM tasks WHERE id = :id")
+    suspend fun deleteById(id: String)
+
     @Query("DELETE FROM tasks")
     suspend fun clear()
 }

@@ -85,7 +85,20 @@ class TehaViewModel(app: Application) : AndroidViewModel(app) {
                 is SyncResult.Ok ->
                     _state.value.copy(
                         syncing = false,
-                        message = result.rejected.firstOrNull()?.let { "The server refused a change: $it" },
+                        // Every refusal, not only the first. Each one left a
+                        // local row that the app has just undone, so a user who
+                        // hears about one of three loses the other two edits
+                        // without ever learning why.
+                        //
+                        // A clean sync keeps whatever message is already on
+                        // screen. add() sets one and then calls sync(), so
+                        // clearing it here erased the confirmation of the very
+                        // task the user had just typed.
+                        message = if (result.rejected.isEmpty()) {
+                            _state.value.message
+                        } else {
+                            result.rejected.joinToString("\n") { "The server refused a change: $it" }
+                        },
                         configured = true,
                     )
                 is SyncResult.Failed ->

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -88,7 +89,13 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
             )
         },
         bottomBar = {
-            Surface(tonalElevation = 3.dp) {
+            // imePadding, because MainActivity calls enableEdgeToEdge(). That
+            // sets decorFitsSystemWindows to false, so adjustResize in the
+            // manifest no longer moves the window, and Scaffold's default
+            // insets cover the system bars and not the keyboard. Without this
+            // the keyboard opens straight over the field and the user types
+            // blind. QuickAddActivity already does the same.
+            Surface(tonalElevation = 3.dp, modifier = Modifier.imePadding()) {
                 QuickAddBar(parse = vm::parse, onSubmit = { vm.add(it) {} })
             }
         },

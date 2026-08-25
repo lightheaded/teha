@@ -28,9 +28,15 @@
 
         <!-- The capture window. It floats over whatever is on the screen, so a
              task reaches the outbox without a context switch. -->
+        <!--
+            exported="false" on purpose. Only the tile in this app starts it,
+            through a PendingIntent that carries this app's own identity, so no
+            export is needed. Exported, any installed app could pop the capture
+            window over whatever is on screen.
+        -->
         <activity
             android:name=".QuickAddActivity"
-            android:exported="true"
+            android:exported="false"
             android:excludeFromRecents="true"
             android:launchMode="singleTask"
             android:taskAffinity=":quickadd"

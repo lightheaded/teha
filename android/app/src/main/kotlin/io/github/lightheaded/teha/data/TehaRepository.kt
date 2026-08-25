@@ -26,6 +26,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.IOException
 import java.util.TimeZone
@@ -186,6 +187,33 @@ class TehaRepository(context: Context) {
         )
     }
 
+    /**
+     * undoRefused repairs the local rows behind commands the server refused.
+     *
+     * A task_add the server refused describes a row that exists nowhere else,
+     * and no later pull can remove it, because a pull only writes what the
+     * server has. So delete it here.
+     *
+     * Any other refusal changed a row the server does own, so the truth is one
+     * pull away. Drop the high water mark and let the next sync fetch every
+     * row again. A refusal is rare, so a full pull is the cheap answer.
+     */
+    private suspend fun undoRefused(refused: List<OutboxEntity>) {
+        var needsFullPull = false
+        refused.forEach { cmd ->
+            val id = runCatching {
+                json.decodeFromString(JsonObject.serializer(), cmd.argsJson)["id"]
+                    ?.jsonPrimitive?.content
+            }.getOrNull()
+            if (cmd.type == "task_add" && id != null) {
+                db.tasks().deleteById(id)
+            } else {
+                needsFullPull = true
+            }
+        }
+        if (needsFullPull) db.meta().put(MetaEntity(KEY_VERSION, "0"))
+    }
+
     // --- sync ---------------------------------------------------------------
 
     /**
@@ -200,39 +228,76 @@ class TehaRepository(context: Context) {
                 return SyncResult.Failed("Set the server address in settings.", false)
             }
             val pending = db.outbox().oldest(MAX_COMMANDS)
-            val commands = pending.map {
-                CommandDto(
-                    uuid = it.uuid,
-                    type = it.type,
-                    args = json.decodeFromString(JsonObject.serializer(), it.argsJson),
-                )
-            }
             val since = version()
-            val response = try {
-                api.sync(SyncRequest(since = since, commands = commands))
+
+            // Everything below the network call runs inside the same guard. A
+            // bad row in the outbox, or a failing write, must return a failure
+            // and not escape: sync() runs in viewModelScope with no handler, so
+            // an escaping exception kills the process, and the same row is
+            // picked again at the next launch. That is a crash at every start.
+            return try {
+                val commands = pending.map {
+                    CommandDto(
+                        uuid = it.uuid,
+                        type = it.type,
+                        args = json.decodeFromString(JsonObject.serializer(), it.argsJson),
+                    )
+                }
+                val response = api.sync(SyncRequest(since = since, commands = commands))
+
+                // Trust the answer only when it answers THIS request. Every
+                // field of SyncResponse has a default and the parser ignores
+                // unknown keys, so any JSON object at all decodes to an empty
+                // response with version 0. A captive portal that returns
+                // {"ok":true} would otherwise look like a clean sync that
+                // confirmed nothing, and the code below would empty the outbox
+                // and set the version back to zero.
+                if (commands.isNotEmpty() && response.applied.isEmpty()) {
+                    return SyncResult.Failed(
+                        "The server answered without confirming any command. " +
+                            "Check the server address.",
+                        false,
+                    )
+                }
+
+                db.projects().upsert(response.projects.map { it.toEntity() })
+                db.labels().upsert(response.labels.map { it.toEntity() })
+                db.tasks().upsert(response.tasks.map { it.toEntity() })
+
+                val answer = response.applied.associateBy { it.uuid }
+
+                // Remove a command ONLY when this answer names it. A command
+                // the server never mentioned is a command the server never
+                // saw, and the outbox is the one table the server cannot
+                // rebuild. Sending it again is free, because the uuid is the
+                // primary key here and the server drops a repeat by uuid.
+                val settled = pending.filter { answer.containsKey(it.uuid) }
+                if (settled.isNotEmpty()) db.outbox().remove(settled.map { it.uuid })
+
+                // A refused command never succeeds on a retry, because the
+                // server answer is deterministic. It leaves the outbox with
+                // the rest, and the reason reaches the user.
+                val refused = pending.filter { answer[it.uuid]?.ok == false }
+                val rejected = refused.mapNotNull { answer[it.uuid]?.error }
+
+                db.meta().put(MetaEntity(KEY_VERSION, response.version.toString()))
+
+                // The local write was optimistic, so a refusal leaves a row
+                // that disagrees with the server. Undo it, or the phone shows
+                // a task for ever that the server has never heard of.
+                if (refused.isNotEmpty()) undoRefused(refused)
+
+                SyncResult.Ok(response.version, rejected)
             } catch (e: ApiError) {
-                return SyncResult.Failed(e.message ?: "The request failed.", e.unauthorized)
+                SyncResult.Failed(e.message ?: "The request failed.", e.unauthorized)
             } catch (e: IOException) {
-                return SyncResult.Failed(
+                SyncResult.Failed(
                     "Cannot reach the server. ${e.message ?: "No answer."}",
                     false,
                 )
             } catch (e: Exception) {
-                return SyncResult.Failed("The answer was not readable. ${e.message}", false)
+                SyncResult.Failed("The sync failed. ${e.message}", false)
             }
-
-            db.projects().upsert(response.projects.map { it.toEntity() })
-            db.labels().upsert(response.labels.map { it.toEntity() })
-            db.tasks().upsert(response.tasks.map { it.toEntity() })
-
-            // A rejected command never succeeds on a retry, because the server
-            // answer is deterministic. Keeping it would block the queue for
-            // ever, so it leaves the outbox and the reason reaches the user
-            // once.
-            val rejected = response.applied.filter { !it.ok }.map { it.error }
-            if (pending.isNotEmpty()) db.outbox().remove(pending.map { it.uuid })
-            db.meta().put(MetaEntity(KEY_VERSION, response.version.toString()))
-            return SyncResult.Ok(response.version, rejected)
         }
     }
 
