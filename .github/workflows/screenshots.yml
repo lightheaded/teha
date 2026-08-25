@@ -1,0 +1,66 @@
+# Fail when the README screenshots no longer match the app.
+#
+# A hand-captured screenshot rots. Someone changes the layout, nobody retakes
+# the image, and the README quietly starts lying about the product. This job
+# makes that impossible to miss: it regenerates the images and fails when they
+# differ from the committed ones.
+#
+# It runs the SAME script a developer runs, inside the SAME pinned container, so
+# a red build means the app changed and not that a font rendered differently on
+# a different machine. See scripts/screenshots.sh and docs/DECISIONS.md D-006.
+
+name: screenshots
+
+on:
+  push:
+    paths:
+      - 'internal/webui/**'
+      - 'cmd/teha/seed.go'
+      - 'scripts/screenshots.*'
+      - 'docs/screenshots/**'
+      - '.github/workflows/screenshots.yml'
+  pull_request:
+    paths:
+      - 'internal/webui/**'
+      - 'cmd/teha/seed.go'
+      - 'scripts/screenshots.*'
+      - 'docs/screenshots/**'
+      - '.github/workflows/screenshots.yml'
+  # The images can also drift when nothing here changes, because the pinned
+  # browser image is rebuilt upstream. A weekly run catches that on a schedule
+  # rather than inside somebody's unrelated pull request.
+  schedule:
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: screenshots-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Check that the screenshots match the app
+        run: scripts/screenshots.sh --check
+
+      # On a failure the author needs to SEE the difference, not just be told
+      # about it. Upload what the app renders now, so a fix is a download away.
+      - name: Upload the images the app renders now
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-current
+          path: .screenshots-check/
+          if-no-files-found: warn
