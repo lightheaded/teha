@@ -11,8 +11,10 @@ Todoist is the fastest way to get a thought into a list. It is also a closed ser
 Three users from day one:
 
 1. **The author.** Captures from the macOS keyboard, the Android notification shade and Claude. Plans the day and the week. Keeps work tasks and life tasks in one place, with source links back into Obsidian.
-2. **The partner.** Shared household projects, a shopping list that works in the store, trip plans. Must never see a spinner, an error code or a developer word. Estonian and English.
-3. **The agent.** Claude through MCP. Reads a filtered list in one call. Adds or updates twenty tasks in one call. Never times out.
+2. **The partner.** Shared household projects, a shopping list that works in the store, trip plans. Must never see a spinner, an error code or a developer word. English only, decided 2026-08-25.
+3. **The agent.** Any agent through MCP, not Claude alone. A locally hosted model counts, and so does another harness. Reads a filtered list in one call. Adds or updates twenty tasks in one call. Never times out.
+
+Both people use Android phones and macOS laptops. The author also uses a Windows desktop, which the Tauri shell covers at no extra cost. Confirmed 2026-08-25.
 
 Scope from day one: tasks, projects, sharing between two people, natural language capture, MCP. Not in scope until Phase 4: teams, billing, iOS native.
 
@@ -36,7 +38,8 @@ Detail: [research/01-todoist-feature-map.md](research/01-todoist-feature-map.md)
 1. **Capture is sacred.** From any surface, the path from intent to saved task is one gesture and one text field. Parsing runs locally. Offline is not an error state.
 2. **Every action is instant and reversible.** The UI never waits for the server. Every mutation has an undo. Deletion is soft for 30 days.
 3. **One language for filters, everywhere.** The web, the apps and MCP share one query language. A saved filter is a saved query. A query in an MCP call is the same string.
-4. **The agent is a first-class client.** MCP tools are designed for a model: few, batchable, compact. What a human does in ten taps, the model does in one call.
+4. **The agent is a first-class client, and it is not one vendor.** MCP tools are designed for a model: few, batchable, compact. What a human does in ten taps, the model does in one call. Assume a small local model, not only a frontier one, so the token budget is a hard limit rather than a target.
+8. **An agent's own work belongs in the list.** A running agent session is a task. See §13.
 5. **No telemetry.** No analytics, no crash reports without opt-in. The only host the app talks to is your server.
 6. **Polish before features.** A feature ships when the partner does not notice that it is new software.
 7. **Small footprint.** One process, one SQLite file, under 50 MB of memory idle, one container image under 40 MB.
@@ -102,12 +105,14 @@ Phase 1 is solo daily driving with import from Todoist. Phase 2 makes it a house
 
 - Household space: projects shared with one other account, assignee per task, "assigned to me" filter, comments with attachments (images, files, up to a size cap), reactions.
 - Push notifications: UnifiedPush through ntfy for Android, Web Push for browsers and iOS PWA. Reminder at time, before due, daily digest, comment and assignment notifications.
-- Shopping mode per project: items grouped by aisle (learned from history, editable), big check targets, recently bought suggestions, quantity in the title (`2x milk`), live sync while two people are in the store, checked items collapse and clear on request.
+- Shopping mode per project: items grouped by category (learned from history, editable), big check targets, recently bought suggestions, quantity in the title (`2x milk`), live sync while two people are in the store, checked items collapse and clear on request.
+  - **Loose categories, not a store map.** Aisle order differs per shop, so a real map is a modelling job with a maintenance burden per shop and little payoff. Learn a category order from what the household actually buys, and let a person drag it. Revisit only if the loose grouping proves useless in a real shop.
+  - **It must work in split screen.** The shop's own scanner app is open beside it, so the layout has to hold at roughly half the screen width, with touch targets that survive one-handed use in a cold aisle. Test at that width, not only at full width.
+  - **Live sync is a requirement here, not a nicety.** Two people shop in parallel and each must see the other tick an item within a second, or they buy it twice. This is what sets the latency target in §7.
 - Board layout (sections as columns) and calendar layout (month and week, drag to reschedule).
 - Deadline field with `{date}` syntax. Duration with `for 30min`.
 - Activity log view per project and per task, with restore.
 - Widgets on Android (Glance): Today list with a filter, add button.
-- Estonian UI translation. Date parsing in Estonian (`homme`, `järgmine esmaspäev`, `iga nädal`).
 - Location reminders on Android (geofence).
 - Templates: save a project as a template, create a project from a template (packing list, trip prep).
 - Project notes: a Markdown page per project (the trip page), tasks can be embedded in it.
@@ -117,7 +122,7 @@ Phase 1 is solo daily driving with import from Todoist. Phase 2 makes it a house
 - Start date (`⏳` in Obsidian terms) separate from due. Deferred tasks are grey in Today until the start date.
 - Snooze that keeps the recurrence, and a "won't do" completion state.
 - Dependencies: `after: <task>`, a "not blocked" filter term.
-- Someday and Anytime buckets. Weekly review mode with a per-project review interval.
+- Someday and Anytime buckets. Weekly review mode with a per-project review interval. **The review is agent-enabled**, decided 2026-08-25: the agent proposes what to defer, drop, split or reschedule, and the person accepts or rejects each suggestion. A review that a person has to run alone is a review that stops after three weeks.
 - Command palette macros: a saved sequence of commands with variables (`{clipboard}`, `{today}`), bound to a key or a URL.
 - Filter language extensions: `sort:`, `group:`, `limit:`, `start:`, `deadline:`, `blocked`, `assigned to:`, `created:`.
 - Calendar feed (iCal) per project and per filter. CalDAV read-only view if cheap.
@@ -184,7 +189,7 @@ One grammar, one parser in Go (server, MCP) and one in TypeScript and Kotlin (cl
 
 ### 6.4 Quick add parser
 
-Input: one line. Output: `{title, due, rrule, priority, project, section, labels, assignee, deadline, duration, reminders}` plus the spans in the source text so the UI can highlight and un-parse tokens. Rules: tokens are removed from the title only when they parse, a date phrase inside quotes stays literal, and `#`, `@`, `/` need a match in the account to be consumed. Locale-aware: English and Estonian.
+Input: one line. Output: `{title, due, rrule, priority, project, section, labels, assignee, deadline, duration, reminders}` plus the spans in the source text so the UI can highlight and un-parse tokens. Rules: tokens are removed from the title only when they parse, a date phrase inside quotes stays literal, and `#`, `@`, `/` need a match in the account to be consumed. English only. A project or a label keeps its Estonian letters, because a name is data rather than interface text.
 
 ### 6.5 MCP
 
@@ -192,7 +197,9 @@ Build against specification revision **2026-07-28**, not the 2025 session model.
 
 What the revision means for this server:
 
+- **Off by default.** The endpoint mounts only when the operator turns it on, with `-mcp` or `TEHA_MCP=1`. Decided 2026-08-25. A task list is a map of a person's life and work, and an always-on tool endpoint on a public hostname widens the blast radius of one leaked token from reading tasks to driving them. An operator who wants it says so once.
 - Same binary, path `/mcp`, Streamable HTTP over POST. Do not implement HTTP+SSE. The specification deprecates it.
+- Do not depend on one vendor's client. A locally hosted model must drive the same tools, so keep every answer inside the token budget in §7 and never rely on a behaviour that only one client has.
 - No `initialize` handshake and no `Mcp-Session-Id`. Each request carries the protocol version and the client capabilities in `_meta`. A version mismatch returns `UnsupportedProtocolVersionError`.
 - Implement `server/discover`. It is mandatory, and it advertises the supported versions, the capabilities and the server identity.
 - Every result carries `resultType`. Ordinary results use `"complete"`.
@@ -240,9 +247,9 @@ Auth: a per-device bearer token in Phase 1. Claude Code connects with `claude mc
 - Every list scrolls at 60 fps with 5 000 tasks.
 - No modal confirmation for a reversible action. Undo instead.
 - Every screen works with one hand on a phone. Primary actions at the bottom.
-- Estonian and English switch per user, dates parse in both.
 - Empty states say what to do next in one sentence.
-- Screenshot tests guard every screen in both themes.
+- Screenshot tests guard every screen in both themes, and the README shows generated images that CI keeps current. See [DECISIONS.md](DECISIONS.md) D-006.
+- **A change one person makes reaches the other person's screen in under one second, on the same network.** Two people shop in parallel, and a slower list means a duplicate in the basket. This is the number that makes shopping mode work, so it is a target and not a hope. Measure it on the phone, in a shop, over mobile data as well.
 
 ## 8. Milestones
 
@@ -254,7 +261,7 @@ Auth: a per-device bearer token in Phase 1. Claude Code connects with `claude mc
 | M3 MCP | Tools, token auth, Claude Code config | An agent plans the day in three calls, never times out | Eight tools, stateless transport, token auth. `plan_day` answers in one call and 114 tokens. |
 | M4 Android | Offline core, tile, share, gestures, Obtainium | Author uninstalls Todoist from the phone | Not started. |
 | M5 macOS | Tauri app, global shortcut, URL scheme | Author removes the Todoist hotkey | A command line client covers capture first. |
-| M6 Household | Sharing, comments, push, shopping mode, Estonian | Partner uses it for groceries for one month without asking for Todoist | Not started. The partner uses Android, so the app matters more than the PWA. |
+| M6 Household | Sharing, comments, push, shopping mode | Partner uses it for groceries for one month without asking for Todoist. Two phones tick items in the same shop and neither buys a duplicate | Not started. The partner uses Android, so the app matters more than the PWA. |
 | M7 Beyond | Start dates, snooze, dependencies, review, macros, Obsidian bridge | A trip is planned in the vault and shopped from the app | Schema carries start date, deadline and `wont_do` already. |
 | M8 Open | F-Droid, docs, hosted pilot | A stranger self-hosts from the README in under 15 minutes | Dockerfile, compose, kustomize and a deployment guide exist. |
 
@@ -290,7 +297,9 @@ Three choices in this plan changed when the code met reality. Each one is small,
 | Two parsers drift | One fixture corpus, CI runs both against it, a fixture is added with every bug. |
 | SQLite write contention with two people and an agent | WAL mode, one writer goroutine, batches. Load test with 50 commands per second. |
 | Tauri quick add feels wrong on macOS | Keep the web app as the UI and build a Swift `NSPanel` quick add if needed. Two weeks of budget. |
-| Partner's phone is an iPhone | PWA with Web Push works on iOS 16.4 and later. Native iOS is Phase 4 with a KMP core. |
+| ~~Partner's phone is an iPhone~~ | Closed 2026-08-25. Both people use Android. iOS is now the installed web app only, see [DECISIONS.md](DECISIONS.md) D-004. |
+| The author's Windows desktop has no client | Tauri v2 builds for Windows from the same source as macOS, so the desktop shell covers it. Confirmed as a requirement 2026-08-25. |
+| Agent tasks turn the app into a second harness | Keep the boundary in §13. teha stores and shows the work. It never runs it. |
 | Public exposure attracts scanners | Invite-only, passkeys, lockout per account and per IP, a flood ceiling at the proxy, no version in headers. Add forwardAuth if the logs show pressure. |
 | Google developer verification (30 September 2026 in four countries, global in 2027) | Limited distribution tier covers 20 devices for free. F-Droid and ADB installs stay exempt. |
 | `rrule-go` is stale (last tag 2023-01-13, last push 2024-08-15) and no better Go option exists | Wrap it behind our own interface, keep an exhaustive fixture corpus, and fork it if a bug appears. |
@@ -346,3 +355,72 @@ Settled by research on 2026-08-25:
 - The public entry point preserves the client address, so per-IP lockout works.
 - `rrule-go` is the only serious Go RRULE library, and it is stale. The build wraps it.
 - No existing open-source project fits. Vikunja comes closest and has no tile, no strong parser and no official MCP server.
+
+---
+
+## 13. Agent work in the task list
+
+Proposed 2026-08-25, from the author's own note. **Not decided.** Read the
+boundary below before building anything here.
+
+### The problem
+
+Several agent sessions run at once, and there is no single place that says what
+each one is doing. The author loses track. A task manager is the natural
+register: every session is work in progress, which is what a task is.
+
+The wish has two halves:
+
+1. An agent writes its own tasks into teha, so that human work and agent work sit
+   in one list. Claude does this, and so must another harness.
+2. A person opens a task, or a group of tasks, and starts an agent on it.
+
+### The boundary
+
+**teha stores and shows the work. It never runs it.**
+
+The second half is where a task manager turns into a harness, and the author
+named that risk himself. Hold the line here for three reasons:
+
+- The server is on a public hostname. A task list that spawns processes is a
+  remote code execution feature with a task list attached.
+- Running work needs isolation, permissions, logs, retries and an audit trail. A
+  task manager has none of those, and growing them means building a worse CI
+  system.
+- The value the author asked for is *visibility*, and visibility needs no
+  execution. Knowing which five sessions are open, and which one is blocked, is
+  the whole win.
+
+So a task carries a pointer to work, never the work itself:
+
+| Field | Holds |
+|---|---|
+| `source_ref` | the harness session identifier, the same column the Todoist import uses |
+| `agent` | which harness owns it, for example `claude-code` or `opencode` |
+| `cwd` | the working directory or the repository the session belongs to |
+| `state` | running, waiting for a person, blocked, done |
+
+Launching stays outside. A small local helper reads the task and starts the
+harness: a shell script, a Raycast command, or a `teha://run?task=<id>` URL that
+only the desktop client answers. That helper runs on the laptop, where the code
+and the credentials already are. The server never learns how to start anything.
+
+### What this needs
+
+- A reserved label for agent work, so an ordinary view is not flooded.
+- An MCP tool that lets a session claim a task and report progress, cheap enough
+  to call often.
+- A view that groups by session and shows which one is waiting for a person.
+- A rule for stale rows: a session that stops without a final update must not
+  leave a task that says "running" for ever.
+
+### Open questions
+
+- Does an agent write into the same account, or into its own project?
+- What stops a chatty agent from filling the list with noise?
+- Where do Hermes tasks fit, given that Hermes already files its own issues?
+- Is a task the right shape for a session at all, or is a session a different
+  row type that borrows the same views?
+
+Answer these before writing code. The first version is worth building only after
+the boundary above holds in a written decision.

@@ -217,3 +217,33 @@ screen whose content cannot be made deterministic.
 and shows none of them in its README. The same rule belongs there: publish the
 canonical Roborazzi outputs and let the existing verify-by-default run keep them
 honest.
+
+---
+
+## D-007 — The MCP endpoint is off unless the operator turns it on
+
+**Date:** 2026-08-25 · **Status:** done
+
+`/mcp` mounts only with `-mcp` or `TEHA_MCP=1`. Without it the path answers 404.
+
+**Why.** A task list is a map of a person's life and work. An agent endpoint
+drives that map rather than only reading it: it adds, edits and completes in
+batches. The server also runs on a public hostname, and one device token guards
+everything until passkeys land. Leaving the endpoint always on means one leaked
+token gives an attacker the controls, not just the view.
+
+Making it opt in costs an operator one flag, once. It buys a smaller blast
+radius for every deployment that never wanted an agent.
+
+**Consequence.** The cluster deployment sets `TEHA_MCP=1` explicitly, with a
+comment saying why. That IS the opt in, and a reader of the manifest can see
+that a person chose it.
+
+**Also decided here:** do not depend on one vendor's client. A locally hosted
+model must drive the same tools, so the token budget in PLAN.md section 7 is a
+hard limit rather than a target, and no answer may rely on a behaviour that only
+one client has.
+
+**Reverses if:** authentication becomes per-client, so that an agent token can
+be scoped and revoked separately from a person's. Then the endpoint can be on by
+default, because a leaked agent token would no longer be a leaked account.

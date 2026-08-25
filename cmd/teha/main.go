@@ -45,6 +45,7 @@ func main() {
 		dbPath  = flag.String("db", envOr("TEHA_DB", "teha.db"), "path to the SQLite file")
 		token   = flag.String("token", os.Getenv("TEHA_TOKEN"), "device token. An empty token in --dev mode turns auth off")
 		dev     = flag.Bool("dev", false, "development mode: no auth, verbose logs")
+		mcpOn   = flag.Bool("mcp", envBool("TEHA_MCP"), "serve the MCP endpoint at /mcp. Off by default: an agent endpoint drives the account, not only reads it, so an operator turns it on deliberately")
 		seed    = flag.Bool("seed", false, "write example data into an empty database and exit")
 		seedDay = flag.String("seed-date", "", "the day that seeded dates count from, as 2006-01-02. Empty means today. Used by the screenshot job, so that an unchanged screen produces an identical image on any day")
 		version = flag.Bool("version", false, "print the version and exit")
@@ -103,12 +104,22 @@ func main() {
 	}
 
 	apiSrv := api.New(st, tok, log)
-	mcpSrv := mcpsrv.New(st, apiSrv)
 
 	mux := http.NewServeMux()
 	mux.Handle("/v1/", apiSrv.Routes())
-	mux.Handle("/mcp", withBearer(tok, mcpSrv.HTTP()))
-	mux.Handle("/mcp/", withBearer(tok, mcpSrv.HTTP()))
+	// Off unless the operator asks for it. A task list is a map of a person's
+	// life and work. An always-on agent endpoint turns one leaked token from a
+	// read of that map into control over it, so the wider blast radius is opt
+	// in. Turn it on with -mcp or TEHA_MCP=1.
+	if *mcpOn {
+		mcpSrv := mcpsrv.New(st, apiSrv)
+		h := withBearer(tok, mcpSrv.HTTP())
+		// Both forms. A client that appends a slash must not get a 404 from the
+		// web app's catch-all handler and then report a broken server.
+		mux.Handle("/mcp", h)
+		mux.Handle("/mcp/", h)
+		log.Info("the MCP endpoint is on", "path", "/mcp")
+	}
 	mux.HandleFunc("/login", loginHandler(tok))
 	mux.Handle("/", webHandler(tok))
 
@@ -229,6 +240,17 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// envBool reads a switch from the environment. Anything a person writes to mean
+// yes counts, because a deployment file is edited by hand and "true" and "1"
+// must not behave differently.
+func envBool(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
 
 func absDir(p string) string {

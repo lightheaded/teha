@@ -681,6 +681,18 @@ absolute path, for example `/usr/local/bin/teha`.
 
 ## 6. Claude and MCP
 
+**The MCP endpoint is off by default.** Start the server with `-mcp`, or set
+`TEHA_MCP=1`. Without it `/mcp` answers 404.
+
+```sh
+teha serve -db ~/teha.db -mcp
+```
+
+The reason is blast radius. A task list is a map of a person's life and work. An
+agent endpoint drives that map rather than only reading it, so one leaked token
+must not hand an attacker the controls as well. An operator turns it on once,
+deliberately.
+
 The server serves MCP at `/mcp` over streamable HTTP, specification revision
 2026-07-28, in stateless mode. There is no session header and no `initialize`
 handshake. A `tools/call` POST gets an answer at once.
