@@ -10,6 +10,20 @@ func TestConvertRecurrence(t *testing.T) {
 		rule          string
 		afterComplete bool
 	}{
+		// The abbreviated keyword. A real account of 250 tasks had 8 rules that
+		// did not convert, and 7 of them differed from a supported form by this
+		// word alone.
+		{in: "ev year", rule: "FREQ=YEARLY"},
+		{in: "ev mon", rule: "FREQ=WEEKLY;BYDAY=MO"},
+		{in: "ev 2nd sun", rule: "FREQ=MONTHLY;BYDAY=2SU"},
+		{in: "ev 4th sat", rule: "FREQ=MONTHLY;BYDAY=4SA"},
+		{in: "ev 3 months", rule: "FREQ=MONTHLY;INTERVAL=3"},
+		{in: "ev workday", rule: "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"},
+		{in: "evry day", rule: "FREQ=DAILY"},
+		// An ordinal over the working week, not over one weekday name.
+		{in: "ev last workday", rule: "FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1"},
+		{in: "every first workday", rule: "FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=1"},
+		{in: "every 2nd weekday of the month", rule: "FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=2"},
 		{in: "every day", rule: "FREQ=DAILY"},
 		{in: "daily", rule: "FREQ=DAILY"},
 		{in: "Every Day", rule: "FREQ=DAILY"},

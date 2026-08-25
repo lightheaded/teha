@@ -39,9 +39,17 @@ var (
 	reEveryNMonths = regexp.MustCompile(`^every (other|\d+) months?$`)
 	reEveryNYears  = regexp.MustCompile(`^every (other|\d+) years?$`)
 	reNthWeekday   = regexp.MustCompile(`^every (first|second|third|fourth|fifth|last|1st|2nd|3rd|4th|5th) ([a-z]+)( of (the )?month)?$`)
-	reMonthDay     = regexp.MustCompile(`^every (\d{1,2})(?:st|nd|rd|th)( of (the )?month)?$`)
-	reWeekOnList   = regexp.MustCompile(`^every week on (.+)$`)
-	reEveryList    = regexp.MustCompile(`^every (.+)$`)
+	// "every last workday" is an ordinal over the working week, not over one
+	// weekday name, so BYDAY carries five days and BYSETPOS picks one of them.
+	reNthWorkday = regexp.MustCompile(`^every (first|second|third|fourth|fifth|last|1st|2nd|3rd|4th|5th) (week ?day|work ?day)s?( of (the )?month)?$`)
+	// Todoist abbreviates the leading keyword in the app and in its exports.
+	// "ev year" and "every year" are the same rule, so normalise before every
+	// pattern below sees the text. Found in a real account: 7 of its 8
+	// unconvertible rules differed from a supported form by this word alone.
+	reEveryWord  = regexp.MustCompile(`^(ev|evry|every)\b`)
+	reMonthDay   = regexp.MustCompile(`^every (\d{1,2})(?:st|nd|rd|th)( of (the )?month)?$`)
+	reWeekOnList = regexp.MustCompile(`^every week on (.+)$`)
+	reEveryList  = regexp.MustCompile(`^every (.+)$`)
 )
 
 // unsupportedClause names the words of a Todoist rule that our model cannot
@@ -96,6 +104,7 @@ func convertRecurrence(text string) (Recurrence, bool) {
 	s = strings.TrimSpace(multiSpace.ReplaceAllString(s, " "))
 	s = timeClause.ReplaceAllString(s, "")
 	s = strings.TrimSpace(s)
+	s = reEveryWord.ReplaceAllString(s, "every")
 
 	for _, word := range strings.Fields(s) {
 		for _, bad := range unsupportedClause {
@@ -162,6 +171,17 @@ func convertRecurrence(text string) (Recurrence, bool) {
 		}
 		return out(withInterval("FREQ=YEARLY", n))
 	}
+	if m := reNthWorkday.FindStringSubmatch(s); m != nil {
+		n, ok := ordinals[m[1]]
+		if !ok {
+			return Recurrence{}, false
+		}
+		return Recurrence{
+			RRule:          fmt.Sprintf("FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=%d", n),
+			FromCompletion: fromCompletion,
+		}, true
+	}
+
 	if m := reNthWeekday.FindStringSubmatch(s); m != nil {
 		nth, known := ordinals[m[1]]
 		day, isDay := weekdays[m[2]]

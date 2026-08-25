@@ -107,11 +107,29 @@ for the whole grammar.
 
 ```sh
 teha ls "overdue | today"
-teha ls "#Trip & p1"
+teha ls "#Trip* & p1"
 teha ls "@call & no date"
 teha ls "search: ferry"
 teha ls "recurring" --limit 100
 ```
+
+**A project name behaves differently here than in quick add.** Learn this once,
+because the two rules look the same and are not:
+
+| Where | `#Trip` means |
+|---|---|
+| Quick add | the one project whose name starts with Trip. An ambiguous prefix is an error, and an unknown name sends the task to the inbox. |
+| A filter | a project named exactly Trip. Nothing else matches. |
+
+In a filter, add a `*` for a prefix: `#Trip*` finds `Trip to Setomaa`. The
+reason for the difference is that quick add must choose ONE project to write
+to, so it refuses to guess. A filter only reads, so a prefix that matches two
+projects returns the tasks of both, which is a useful answer rather than an
+error.
+
+An empty filter means every OPEN task. A query that names a state keeps that
+state: `done`, `completed`, `wont do`, `skipped` and `open` all work, and none
+of them is narrowed to open tasks afterward.
 
 ### `teha done <id or title fragment>`
 

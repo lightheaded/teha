@@ -82,7 +82,8 @@ AGPL-3.0-or-later, the server:
 
   cmd/teha          the binary: server, seed, import, command line client
   internal/store    SQLite schema, commands, sync, queries
-  internal/api      HTTP: /v1/sync, /v1/tasks, /v1/events, /v1/export
+  internal/api      HTTP: /v1/sync, /v1/tasks, /v1/projects, /v1/labels,
+                    /v1/events, /v1/export, /v1/health
   internal/mcpsrv   the MCP server and its tools
   internal/webui    the web app, embedded in the binary
   internal/todoist  the Todoist importer

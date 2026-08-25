@@ -95,8 +95,50 @@ func TestEmptyQueryMatchesEverythingOpen(t *testing.T) {
 	if err != nil || len(args) != 0 {
 		t.Fatalf("empty query: sql=%q args=%v err=%v", sql, args, err)
 	}
-	if sql != "1=1" {
+	// This test asserted "1=1" until 2026-08-25, which is what its own name
+	// says it must not be. An empty query returned early, before the narrowing
+	// step, so `list_tasks` with no filter and `teha ls` with no argument both
+	// answered with completed rows mixed in.
+	if sql != "state = 'open'" {
 		t.Fatalf("empty query compiled to %q", sql)
+	}
+}
+
+// The narrowing must key off what the parser saw, not off the query text.
+// A search for the word done, and a project whose name contains it, both used
+// to switch the narrowing off and mix completed rows into an ordinary view.
+func TestStateNarrowingIgnoresTextThatOnlyLooksLikeState(t *testing.T) {
+	for _, q := range []string{"search: done", "#Done", "search: completed", "%done"} {
+		sql, _, err := Compile(q, today)
+		if err != nil {
+			t.Fatalf("%q: %v", q, err)
+		}
+		if !strings.Contains(sql, "state = 'open'") {
+			t.Errorf("%q compiled to %q, which does not narrow to open tasks", q, sql)
+		}
+	}
+}
+
+// A query that names a state must keep it, and must not be narrowed on top.
+func TestExplicitStateTermsAreKept(t *testing.T) {
+	cases := map[string]string{
+		"done":      "state = 'done'",
+		"completed": "state = 'done'",
+		"wont do":   "state = 'wont_do'",
+		"skipped":   "state = 'wont_do'",
+		"open":      "state = 'open'",
+	}
+	for q, want := range cases {
+		sql, _, err := Compile(q, today)
+		if err != nil {
+			t.Fatalf("%q: %v", q, err)
+		}
+		if !strings.Contains(sql, want) {
+			t.Errorf("%q compiled to %q, want it to contain %q", q, sql, want)
+		}
+		if q != "open" && strings.Contains(sql, "state = 'open'") {
+			t.Errorf("%q compiled to %q, which narrows a state query to open tasks", q, sql)
+		}
 	}
 }
 

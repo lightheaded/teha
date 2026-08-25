@@ -28,7 +28,11 @@ func Compile(query string, today time.Time) (string, []any, error) {
 	p := &parser{lex: lex(query), today: today}
 	p.next()
 	if p.tok.kind == tokEOF {
-		return "1=1", nil, nil
+		// An empty query means every OPEN task, not every task. It used to
+		// return here before the narrowing below, so `list_tasks` with no
+		// filter and `teha ls` with no argument both answered with completed
+		// rows as well.
+		return "state = 'open'", nil, nil
 	}
 	sql, args, err := p.parseOr()
 	if err != nil {
@@ -37,8 +41,12 @@ func Compile(query string, today time.Time) (string, []any, error) {
 	if p.tok.kind != tokEOF {
 		return "", nil, fmt.Errorf("unexpected %q at position %d", p.tok.text, p.tok.pos)
 	}
-	// A filter shows open tasks unless it asks for completed ones.
-	if !strings.Contains(query, "done") && !strings.Contains(query, "completed") {
+	// A filter shows open tasks unless the query named a state itself.
+	//
+	// The test is what the PARSER saw, not what the text contains. A text
+	// search for the word done, or a project named Done, used to switch the
+	// narrowing off and silently mix completed rows into an ordinary view.
+	if !p.saidState {
 		sql = "(" + sql + ") AND state = 'open'"
 	}
 	return sql, args, nil
@@ -106,6 +114,11 @@ type parser struct {
 	at    int
 	tok   token
 	today time.Time
+	// saidState records that the query named a task state itself, so Compile
+	// must not narrow to open tasks on top of it. A term sets this, not a
+	// search of the query text: the text "search: done" and a project called
+	// "Done" both contain the word and mean nothing about state.
+	saidState bool
 }
 
 func (p *parser) next() {
@@ -219,9 +232,17 @@ func (p *parser) term(word string) (string, []any, error) {
 	case "not started", "deferred":
 		return "(start_date IS NOT NULL AND start_date > ?)", []any{day(0)}, nil
 	case "done", "completed":
+		p.saidState = true
 		return "state = 'done'", nil, nil
-	case "wont do", "won't do":
+	case "wont do", "wont-do", "won't do", "skipped":
+		p.saidState = true
 		return "state = 'wont_do'", nil, nil
+	case "open", "active":
+		p.saidState = true
+		return "state = 'open'", nil, nil
+	case "any state", "all states":
+		p.saidState = true
+		return "1=1", nil, nil
 	case "week", "next 7 days", "7 days":
 		return "(due_date IS NOT NULL AND due_date <= ?)", []any{day(7)}, nil
 	}
