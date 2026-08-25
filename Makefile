@@ -1,5 +1,10 @@
 # teha build targets. POSIX sh only.
 
+# The SQLite driver is pure Go, so nothing here needs a C compiler. Exporting
+# this for every target keeps `make test` working on a machine that has no gcc
+# and no Xcode command line tools.
+export CGO_ENABLED = 0
+
 BINARY  ?= teha
 VERSION ?= dev
 IMAGE   ?= teha:$(VERSION)
@@ -10,7 +15,7 @@ ADDR    ?= 127.0.0.1:8637
 .PHONY: build test run seed lint docker clean
 
 build:
-	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o $(BINARY) ./cmd/teha
+	go build -trimpath -ldflags "-s -w" -o $(BINARY) ./cmd/teha
 
 test:
 	go test ./...
