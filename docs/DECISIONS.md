@@ -123,11 +123,17 @@ legal one.
 The server, the shared packages, the web app and the Android app live in one
 repository. Releases separate by tag prefix, not by repository:
 
-| Tag | Builds | Published to |
+| Artifact | Versioned by | Published to |
 |---|---|---|
-| a push to `main` | the server image | `ghcr.io/lightheaded/teha:<commit>` |
-| `android-v*` | the Android APK | a GitHub Release, for Obtainium |
-| `server-v*` | a versioned server image | `ghcr.io/lightheaded/teha:<version>` |
+| the server image | the commit hash | `ghcr.io/lightheaded/teha:<commit>` |
+| the Android APK | `v<base>.<CI run number>` | a GitHub Release, for Obtainium |
+
+**A GitHub Release in this repository is always an Android build, and never a
+server build.** The server is versioned by its image tag in the registry, which
+is the artifact store it already needs. That rule exists for one reason:
+Obtainium follows the Latest release and expects an APK asset there. A server
+release would take the Latest pointer and hand every phone a release with no
+APK in it.
 
 **Why one repository.** D-002 binds the Go parser into the Android app with
 `gomobile bind`. Inside one module that binding reads the working tree. Across
@@ -145,10 +151,12 @@ Three more reasons follow the same line:
 - A change that touches the sync protocol touches the server and every client.
   One commit shows the whole change, and one revert undoes it.
 
-**Why the releases still separate.** Obtainium reads GitHub Releases. It must
-see the Android builds and nothing else, so the workflow tags them
-`android-v*` and Obtainium filters on that prefix. A server change therefore
-never shows up as a phone update.
+**Why the releases still separate.** Obtainium reads the tracked version out of
+the git tag name, and its maintainer declined richer parsing, so a filter
+expression is not a reliable escape hatch. The tag must therefore be exactly
+`v` plus the version string. Keeping server builds out of GitHub Releases
+entirely is what makes that possible, and it means a server change never shows
+up as a phone update.
 
 **Cost.** CI carries a Go job and an Android job, and the Android job is slow.
 Path filters keep it from running on a server-only change. A reader who wants
