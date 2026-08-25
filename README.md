@@ -75,6 +75,7 @@ Apache-2.0, the shared contract every client links:
   filter            the filter language, compiled to SQL
   recur             RRULE handling
   quickadd          the quick add parser
+  mobile            the gomobile binding for Android and iOS
   parser-fixtures   the shared corpus, one contract for every client
 
 AGPL-3.0-or-later, the server:

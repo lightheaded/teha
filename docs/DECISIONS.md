@@ -113,3 +113,50 @@ small. An eviction then costs a re-sync and never an edit.
 **Reverses if:** a Control Center control or a share sheet becomes the reason
 capture fails. The licence layout in D-001 makes that a build decision, not a
 legal one.
+
+---
+
+## D-005 — One repository, one release train per artifact
+
+**Date:** 2026-08-25 · **Status:** decided
+
+The server, the shared packages, the web app and the Android app live in one
+repository. Releases separate by tag prefix, not by repository:
+
+| Tag | Builds | Published to |
+|---|---|---|
+| a push to `main` | the server image | `ghcr.io/lightheaded/teha:<commit>` |
+| `android-v*` | the Android APK | a GitHub Release, for Obtainium |
+| `server-v*` | a versioned server image | `ghcr.io/lightheaded/teha:<version>` |
+
+**Why one repository.** D-002 binds the Go parser into the Android app with
+`gomobile bind`. Inside one module that binding reads the working tree. Across
+two repositories it reads a published Go module, so every parser change needs a
+tag, a release and a dependency bump before the app can use it. That turns a
+one-line parser fix into a four-step release dance.
+
+Three more reasons follow the same line:
+
+- `parser-fixtures/quickadd.json` is the contract between the clients. One
+  repository runs the Go parser, the web parser and the Android parser against
+  it in one CI job. Two repositories cannot fail one build when they drift.
+- The licence split (D-001) already spans the tree, and the Android app links
+  the Apache-2.0 half. One `LICENSING.md` describes it once.
+- A change that touches the sync protocol touches the server and every client.
+  One commit shows the whole change, and one revert undoes it.
+
+**Why the releases still separate.** Obtainium reads GitHub Releases. It must
+see the Android builds and nothing else, so the workflow tags them
+`android-v*` and Obtainium filters on that prefix. A server change therefore
+never shows up as a phone update.
+
+**Cost.** CI carries a Go job and an Android job, and the Android job is slow.
+Path filters keep it from running on a server-only change. A reader who wants
+only the Android app clones more than they need, which costs disk and nothing
+else.
+
+**Reverses if:** the Android app grows its own release cadence and its own
+contributors, and the shared packages stabilise enough that a published Go
+module version stops being a burden. Splitting later is cheap. `git filter-repo`
+extracts the directory with its history, and the shared packages are already
+importable, because D-001 moved them out of `internal/`.

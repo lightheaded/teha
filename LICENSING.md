@@ -5,7 +5,7 @@ teha uses two licences on purpose. The table says which applies where.
 | Tree | Licence | SPDX |
 |---|---|---|
 | `internal/api`, `internal/store`, `internal/mcpsrv`, `internal/webui`, `internal/todoist`, `cmd/teha` | GNU Affero General Public License v3.0 or later | `AGPL-3.0-or-later` |
-| `id`, `filter`, `recur`, `quickadd`, `parser-fixtures` | Apache License 2.0 | `Apache-2.0` |
+| `id`, `filter`, `recur`, `quickadd`, `mobile`, `parser-fixtures` | Apache License 2.0 | `Apache-2.0` |
 
 Full texts: [LICENSE](LICENSE) and [LICENSE.Apache-2.0](LICENSE.Apache-2.0).
 Every source file carries an `SPDX-License-Identifier` line. That line is the
@@ -23,12 +23,13 @@ must offer its source to its own users.
 
 ## Why the shared layer is Apache-2.0
 
-Four packages define the shared contract between every client:
+Five packages define the shared contract between every client:
 
 - `id` — the short sortable identifier scheme
 - `filter` — the filter grammar and its compilers
 - `recur` — recurrence rules
 - `quickadd` — the quick add parser, with `parser-fixtures/` as its corpus
+- `mobile` — the gomobile binding that exposes the four above to Android and iOS
 
 A native client links these packages. Apple adds redistribution limits to the
 App Store that the GPL family forbids. That conflict removed VLC from the store
