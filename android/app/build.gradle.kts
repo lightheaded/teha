@@ -118,13 +118,15 @@ dependencies {
     implementation(libs.compose.ui.graphics)
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.compose.material3)
-    implementation(libs.compose.material.icons.extended)
+    implementation(libs.compose.material.icons.core)
+    implementation(libs.compose.foundation)
     debugImplementation(libs.compose.ui.tooling)
 
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
 
+    implementation(libs.kotlinx.coroutines.android)
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
 
