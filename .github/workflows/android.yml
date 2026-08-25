@@ -1,0 +1,346 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+name: android
+
+# A change to server code must not spend twenty minutes on an Android build.
+# The paths list therefore names the Android tree and the shared packages that
+# the binding compiles, and nothing else.
+on:
+  push:
+    paths:
+      - 'android/**'
+      - 'mobile/**'
+      - 'quickadd/**'
+      - 'filter/**'
+      - 'recur/**'
+      - 'id/**'
+      - 'parser-fixtures/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/android.yml'
+  pull_request:
+    paths:
+      - 'android/**'
+      - 'mobile/**'
+      - 'quickadd/**'
+      - 'filter/**'
+      - 'recur/**'
+      - 'id/**'
+      - 'parser-fixtures/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/android.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The NDK version is pinned, because gomobile links against it. Change it
+  # here and nowhere else.
+  NDK_VERSION: '27.2.12479018'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up the Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: ''
+
+      - name: Install the platform, the build tools and the NDK
+        run: |
+          sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "ndk;${NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=${ANDROID_SDK_ROOT}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Build the gomobile binding
+        run: |
+          # gomobile bind needs golang.org/x/mobile in the module graph. The
+          # change stays in the runner: go mod tidy would drop it again,
+          # because ./mobile imports none of it directly.
+          go get golang.org/x/mobile/bind
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          gomobile init
+          gomobile bind -target=android -androidapi 26 \
+            -javapkg io.github.lightheaded \
+            -o android/app/libs/teha.aar ./mobile
+          ls -l android/app/libs
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          build-scan-publish: false
+
+      - name: Build the debug APK
+        working-directory: android
+        run: ./gradlew --no-daemon :app:assembleDebug
+
+      - name: Build the release APK
+        working-directory: android
+        env:
+          TEHA_BUILD_NUMBER: ${{ github.run_number }}
+        run: ./gradlew --no-daemon :app:assembleRelease
+
+      - name: Keep the binding and the APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build
+          retention-days: 7
+          path: |
+            android/app/build/outputs/apk/**/*.apk
+            android/app/build/outputs/mapping/release/mapping.txt
+            android/app/libs/teha.aar
+
+  # The corpus test runs on an emulator, because the .aar carries an Android
+  # .so and a JVM run has no native library to load. The job does not gate the
+  # release: an emulator failure is usually the emulator.
+  corpus:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up the Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: ''
+
+      - name: Install the platform, the build tools and the NDK
+        run: |
+          sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "ndk;${NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=${ANDROID_SDK_ROOT}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Build the gomobile binding
+        run: |
+          go get golang.org/x/mobile/bind
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          gomobile init
+          gomobile bind -target=android -androidapi 26 \
+            -javapkg io.github.lightheaded \
+            -o android/app/libs/teha.aar ./mobile
+
+      - name: Let the emulator use KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run the corpus on an emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          working-directory: android
+          script: ./gradlew --no-daemon :app:connectedDebugAndroidTest
+
+  release:
+    # Every release in this repository is the Android app. The server ships as
+    # a container image and never gets a GitHub Release, so the "latest"
+    # pointer always aims at an APK. Obtainium depends on that.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # The notes walk back to the previous v* tag, so the whole history is
+      # needed.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Refuse to run without a keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.TEHA_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.TEHA_KEYSTORE_PASSWORD }}
+        run: |
+          # A silent skip produces a green run that ships nothing. On main that
+          # is worse than a failure, so the job stops here instead.
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "TEHA_KEYSTORE_BASE64 and TEHA_KEYSTORE_PASSWORD are required."
+            echo "Add both as repository secrets. See android/README.md."
+            exit 1
+          fi
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up the Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: ''
+
+      - name: Install the platform, the build tools and the NDK
+        run: |
+          sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "ndk;${NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=${ANDROID_SDK_ROOT}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Build the gomobile binding
+        run: |
+          go get golang.org/x/mobile/bind
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          gomobile init
+          gomobile bind -target=android -androidapi 26 \
+            -javapkg io.github.lightheaded \
+            -o android/app/libs/teha.aar ./mobile
+
+      - name: Decode the keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.TEHA_KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/teha-release.jks"
+          test -s "$RUNNER_TEMP/teha-release.jks"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          build-scan-publish: false
+
+      - name: Build the signed release APK
+        working-directory: android
+        env:
+          TEHA_BUILD_NUMBER: ${{ github.run_number }}
+          TEHA_KEYSTORE_PATH: ${{ runner.temp }}/teha-release.jks
+          TEHA_KEYSTORE_PASSWORD: ${{ secrets.TEHA_KEYSTORE_PASSWORD }}
+          TEHA_KEY_ALIAS: teha
+          # One password for the store and for the key. Two passwords give no
+          # extra protection here, because both live in the same secret store.
+          TEHA_KEY_PASSWORD: ${{ secrets.TEHA_KEYSTORE_PASSWORD }}
+        run: ./gradlew --no-daemon :app:assembleRelease
+
+      - name: Read the version
+        id: version
+        working-directory: android
+        env:
+          TEHA_BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          # The Gradle task is the one source of the version. A grep over the
+          # Kotlin file would break on a formatting change with no warning.
+          version=$(./gradlew --no-daemon -q :app:printVersion | tail -n 1 | tr -d '[:space:]')
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Collect the assets
+        id: assets
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # -print -quit stops at the first match and opens no pipe, so
+          # pipefail cannot trip on a SIGPIPE here.
+          apk=$(find android/app/build/outputs/apk/release -name '*.apk' -print -quit)
+          test -n "$apk"
+          # The APK filename never carries the version, so that
+          # /releases/latest/download/teha-latest.apk is a permanent link.
+          cp "$apk" dist/teha-latest.apk
+
+          map=android/app/build/outputs/mapping/release/mapping.txt
+          if [ ! -s "$map" ]; then
+            echo "mapping.txt is missing. R8 ran, so a crash from this build"
+            echo "cannot be retraced. The release stops here."
+            exit 1
+          fi
+          # The mapping filename does carry the version, so a mapping can never
+          # be read against the wrong build.
+          cp "$map" "dist/teha-mapping-${VERSION}.txt"
+          ls -l dist
+
+      - name: Write the release notes
+        id: notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # A re-run finds the tag it is about to write, so that one is skipped.
+          # Without the skip the range is empty and the notes say nothing.
+          previous=$(git tag --list 'v*' --sort=-creatordate | grep -v -x "v${VERSION}" | head -n 1 || true)
+          if [ -n "$previous" ]; then
+            range="${previous}..HEAD"
+          else
+            range="HEAD"
+          fi
+          echo "The notes cover $range."
+          {
+            echo "## What changed"
+            echo
+            git log --no-merges --format='- %s' "$range"
+            echo
+            echo "## Detail"
+            echo
+            git log --no-merges --format='### %s%n%n%b%n' "$range"
+          } | grep -v -e '^Co-Authored-By:' -e '^Claude-Session:' > notes.md || true
+          if [ ! -s notes.md ]; then
+            echo "No commit reached this build." > notes.md
+          fi
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # github.run_number does not move on a re-run, so the tag already
+          # exists then. Delete the release and the tag first, and the re-run
+          # replaces the build instead of failing on it.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release delete "$TAG" --yes --cleanup-tag
+          fi
+          # --latest and neither --draft nor --prerelease. A repository whose
+          # every release is a prerelease has no Latest at all, which breaks
+          # both the permanent download link and Obtainium. The version string
+          # already says alpha.
+          gh release create "$TAG" \
+            --title "teha $VERSION" \
+            --notes-file notes.md \
+            --latest \
+            dist/teha-latest.apk \
+            "dist/teha-mapping-${VERSION}.txt"
