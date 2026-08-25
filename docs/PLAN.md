@@ -39,10 +39,10 @@ Detail: [research/01-todoist-feature-map.md](research/01-todoist-feature-map.md)
 2. **Every action is instant and reversible.** The UI never waits for the server. Every mutation has an undo. Deletion is soft for 30 days.
 3. **One language for filters, everywhere.** The web, the apps and MCP share one query language. A saved filter is a saved query. A query in an MCP call is the same string.
 4. **The agent is a first-class client, and it is not one vendor.** MCP tools are designed for a model: few, batchable, compact. What a human does in ten taps, the model does in one call. Assume a small local model, not only a frontier one, so the token budget is a hard limit rather than a target.
-8. **An agent's own work belongs in the list.** A running agent session is a task. See §13.
 5. **No telemetry.** No analytics, no crash reports without opt-in. The only host the app talks to is your server.
 6. **Polish before features.** A feature ships when the partner does not notice that it is new software.
 7. **Small footprint.** One process, one SQLite file, under 50 MB of memory idle, one container image under 40 MB.
+8. **An agent's own work belongs in the list.** A running agent session is work in progress, which is what a task is. teha shows that work. It never runs it. See §13.
 
 ## 4. Feature map by phase
 
