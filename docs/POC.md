@@ -156,13 +156,19 @@ The Go parser and the web parser both run the corpus in
 
 ## What this build does not have
 
-- No Android app, no macOS app, no widget, no quick settings tile.
+*Updated 2026-08-26. The Android app now ships, and the server runs behind the
+public entry point.*
+
+- No macOS app and no widget. The Android app has a quick settings tile, and it
+  covers two views only: Today and All open.
+- On the phone a task row completes or reopens. There is no detail screen, so a
+  single task's date, notes or labels can only change in the browser.
 - No sharing, no second account, no push, no comments, no attachments.
 - No passkeys. One device token guards everything, and the browser keeps it in
   a cookie.
 - No sections, no board layout, no calendar layout.
-- Litestream is wired in the compose file, but no restore has been rehearsed
-  against real object storage.
+- Litestream replicates the cluster database and reports a matching transaction
+  id, but nobody has rehearsed a restore from those files.
 - The web app stores its state in `localStorage`, not in OPFS with SQLite. That
   is fine for thousands of tasks and needs replacing before it holds a decade of
   history.
@@ -190,10 +196,19 @@ The Go parser and the web parser both run the corpus in
 
 ## Next, in order
 
-1. Run the real import, then daily drive the result for a week (M1 exit test).
-2. Deploy behind the public entry point, with Litestream running and a restore
-   rehearsed once.
-3. The Android app with the quick settings tile (M4). This is the largest
-   remaining risk, because it is a third parser and a second local store. The
-   partner uses Android, so this is also what unlocks the household milestone.
-4. Passkeys, then invite the second account.
+*Updated 2026-08-26. Steps 1 to 3 of the first list are done: the real import
+ran, the server runs at a public address with Litestream replicating, and the
+Android app ships through Obtainium with a signed release.*
+
+1. **A task detail screen on the phone.** Today a row completes or reopens, and
+   nothing else. Every other edit needs the browser, which is the largest daily
+   drive gap that remains.
+2. **Rehearse a restore** from the Litestream replica into an empty volume, and
+   write down the steps that worked.
+3. **Passkeys, then the second account.** The partner cannot use the app at all
+   until an account exists that is not the owner's device token. This is what
+   unlocks the household milestone.
+4. **Multi-select with bulk actions,** in both clients. The overdue Reschedule
+   button is the first bulk action, and D-008 fixes the wire shape for the rest:
+   complete, label, and move to a project.
+5. **Reminders and notifications.** Web Push with VAPID, per D-003.
