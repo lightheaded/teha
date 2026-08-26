@@ -20,3 +20,16 @@
     kotlinx.serialization.KSerializer serializer(...);
 }
 -keep,includedescriptorclasses class io.github.lightheaded.teha.**$$serializer { *; }
+
+# Tink, which androidx.security.crypto uses for EncryptedSharedPreferences,
+# carries compile-time annotations that never ship in an artifact. R8 sees the
+# references and stops the build over classes that cannot exist at runtime.
+#
+# The first build failed on exactly this:
+#   Missing class com.google.errorprone.annotations.CanIgnoreReturnValue
+#   (referenced from com.google.crypto.tink.KeysetManager and 52 other contexts)
+#
+# -dontwarn, not -keep: keeping them is impossible, because they are not there.
+-dontwarn com.google.errorprone.annotations.**
+-dontwarn com.google.j2objc.annotations.**
+-dontwarn javax.annotation.**
