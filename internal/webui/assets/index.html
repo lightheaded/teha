@@ -45,6 +45,10 @@ header .st{margin-left:auto;font-size:12.5px;color:var(--ink-3);font-family:var(
 .list{flex:1;overflow-y:auto;padding:6px 10px 90px}
 .row{display:flex;gap:11px;align-items:flex-start;padding:9px 8px;border-radius:8px;cursor:default}
 .row.sel{background:var(--bg-2);box-shadow:inset 2px 0 0 var(--accent)}
+/* A picked row is tinted and carries a solid bar, so a set of them reads as a
+   block at a glance. The cursor row keeps its own thinner bar. */
+.row.mk{background:color-mix(in srgb,var(--accent) 13%,transparent);box-shadow:inset 3px 0 0 var(--accent)}
+.row.mk.sel{background:color-mix(in srgb,var(--accent) 20%,transparent)}
 .row .box{flex:none;width:19px;height:19px;margin-top:1px;border:1.6px solid var(--ink-3);border-radius:50%;background:none;cursor:pointer}
 .row.p1 .box{border-color:var(--p1)} .row.p2 .box{border-color:var(--p2)} .row.p3 .box{border-color:var(--p3)}
 .row .box:hover{background:var(--accent);border-color:var(--accent)}
@@ -68,6 +72,13 @@ header .st{margin-left:auto;font-size:12.5px;color:var(--ink-3);font-family:var(
 .menu .w{color:var(--ink-3);font-size:12.5px}
 .menu .pick{border-top:1px solid var(--line);border-radius:0 0 6px 6px;margin-top:4px;padding-top:10px}
 .menu .pick input{width:120px;padding:3px 5px;font:inherit;font-size:13px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px}
+/* The bulk bar sits where the toast sits. A bulk action clears the selection,
+   so the bar leaves as the toast arrives and the two never stack. */
+.bulk{position:fixed;left:50%;transform:translateX(-50%);bottom:22px;z-index:20;display:flex;gap:6px;align-items:center;padding:7px 9px;background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.28)}
+.bulk .n{font-size:13px;color:var(--ink-2);padding:0 6px;font-variant-numeric:tabular-nums}
+.bulk button{background:var(--bg-2);border:1px solid var(--line);border-radius:7px;padding:5px 10px;font:inherit;font-size:13px;color:var(--ink);cursor:pointer}
+.bulk button:hover{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.bulk button.ghost{background:none;border-color:transparent;color:var(--ink-3)}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:22px;background:var(--ink);color:var(--bg);padding:10px 14px;border-radius:8px;display:flex;gap:12px;align-items:center;font-size:14px;box-shadow:0 6px 24px rgba(0,0,0,.25)}
 .toast button{background:none;border:none;color:var(--accent);font-weight:600;cursor:pointer}
 .fab{position:fixed;right:18px;bottom:18px;width:52px;height:52px;border-radius:50%;border:none;background:var(--accent);color:var(--accent-ink);font-size:26px;box-shadow:0 6px 20px rgba(0,0,0,.25);cursor:pointer}

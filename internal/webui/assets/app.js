@@ -19,6 +19,12 @@ const S = {
   online: true,
   detail: null,
   menu: null,
+  // marked holds the ids of the tasks a bulk action will touch. It is not
+  // saved: a selection is about the next few seconds, and a stale selection
+  // read back from storage would act on rows the user cannot remember picking.
+  marked: new Set(),
+  // anchor is the row a shift click measures a range from.
+  anchor: 0,
 };
 
 import { parseQuickAdd, newId, iso } from './parse.js';
@@ -226,6 +232,10 @@ function rescheduleAll(tasks, date) {
   if (!tasks.length) return;
   const before = tasks.map((t) => ({ id: t.id, due: t.due_date || null, time: t.due_time || null }));
   tasks.forEach((t) => setDue(t, date));
+  // Every bulk action drops the selection, this one included. A set that
+  // survived its own action was still marked for the next one, so a second
+  // action hit tasks the user believed they had already dealt with.
+  S.marked.clear();
   const n = tasks.length;
   const what = n === 1 ? '1 task' : n + ' tasks';
   toast(date ? `Moved ${what} to ${whenWord(date)}` : `Took the date off ${what}`, () => {
@@ -263,8 +273,50 @@ function setDue(t, date, time) {
   queue('task_update', args);
 }
 
-function rescheduleMenu(anchor, tasks) {
+// dayWord prints one day for a menu hint.
+function dayWord(d) {
+  return new Date(d + 'T00:00').toLocaleDateString(undefined,
+    { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+// popup opens one menu under an anchor element.
+//
+// items are { label, hint, run }. footer is optional raw HTML for a row the
+// caller wires itself, such as the date field on the reschedule menu. The
+// return value is the menu element, so the caller can reach that row.
+function popup(anchor, items, footer) {
   closeMenu();
+  const back = document.createElement('div');
+  back.className = 'menu-back';
+  const el = document.createElement('div');
+  el.className = 'menu';
+  el.innerHTML = items.map((it, i) => `<button data-i="${i}"><span>${esc(it.label)}</span>`
+    + `<span class="w">${esc(it.hint || '')}</span></button>`).join('') + (footer || '');
+
+  [...el.querySelectorAll('button')].forEach((b) => {
+    b.onclick = () => { closeMenu(); items[Number(b.dataset.i)].run(); };
+  });
+  back.onclick = closeMenu;
+  document.body.append(back, el);
+
+  // The menu is placed after it is in the document, because the height is only
+  // known once the browser has laid it out. It opens below the anchor when
+  // there is room and above it when there is not: the bulk bar sits at the
+  // bottom of the window, and a menu that opened downwards from there ran off
+  // the screen and hid its own last choices.
+  const r = anchor.getBoundingClientRect();
+  const h = el.offsetHeight;
+  const below = r.bottom + 6;
+  const top = below + h <= window.innerHeight - 8 ? below : Math.max(8, r.top - 6 - h);
+  el.style.top = Math.round(top) + 'px';
+  el.style.left = Math.round(Math.max(8, Math.min(r.left, window.innerWidth - 248))) + 'px';
+  S.menu = { back, el };
+  const first = el.querySelector('button');
+  if (first) first.focus();
+  return el;
+}
+
+function rescheduleMenu(anchor, tasks) {
   const opts = [
     ['Today', plusDays(0)],
     ['Tomorrow', plusDays(1)],
@@ -272,29 +324,17 @@ function rescheduleMenu(anchor, tasks) {
     ['Next week', nextDow(1) === todayISO() ? plusDays(7) : nextDow(1)],
     ['No date', null],
   ];
-  const back = document.createElement('div');
-  back.className = 'menu-back';
-  const el = document.createElement('div');
-  el.className = 'menu';
-  el.innerHTML = opts.map(([label, d], i) => `<button data-i="${i}"><span>${esc(label)}</span>`
-    + `<span class="w">${d ? esc(new Date(d + 'T00:00').toLocaleDateString(undefined,
-        { weekday: 'short', day: 'numeric', month: 'short' })) : ''}</span></button>`).join('')
-    + `<label class="pick"><span>Pick a day</span><input type="date" value="${todayISO()}"></label>`;
-
-  const r = anchor.getBoundingClientRect();
-  el.style.top = Math.round(r.bottom + 6) + 'px';
-  el.style.left = Math.round(Math.max(8, Math.min(r.left, window.innerWidth - 248))) + 'px';
-
-  [...el.querySelectorAll('button')].forEach((b) => {
-    b.onclick = () => { closeMenu(); rescheduleAll(tasks, opts[Number(b.dataset.i)][1]); };
-  });
-  el.querySelector('input').onchange = (e) => {
-    if (e.target.value) { closeMenu(); rescheduleAll(tasks, e.target.value); }
+  const el = popup(
+    anchor,
+    opts.map(([label, d]) => ({ label, hint: d ? dayWord(d) : '', run: () => rescheduleAll(tasks, d) })),
+    `<label class="pick"><span>Pick a day</span><input type="date" value="${todayISO()}"></label>`,
+  );
+  el.querySelector('.pick input').onchange = (e) => {
+    // The value is read before the menu closes. closeMenu detaches the field,
+    // and a detached field is not a thing to read state from.
+    const day = e.target.value;
+    if (day) { closeMenu(); rescheduleAll(tasks, day); }
   };
-  back.onclick = closeMenu;
-  document.body.append(back, el);
-  S.menu = { back, el };
-  el.querySelector('button').focus();
 }
 
 function closeMenu() {
@@ -302,6 +342,133 @@ function closeMenu() {
   S.menu.back.remove();
   S.menu.el.remove();
   S.menu = null;
+}
+
+// --- many tasks at once -----------------------------------------------------
+// D-008: a bulk action is one command per task, never one command that carries
+// a query. The outbox is a replay log, so a command that names an id and a
+// value does the same thing whenever it runs. "Everything overdue" would mean
+// a different set of tasks every time the server read it.
+
+// markedRows returns the marked tasks that are on screen.
+//
+// On screen, not in the account. A mark survives a change of view, and acting
+// on a row the user can no longer see is a change nobody can check.
+function markedRows() {
+  return visible().filter((t) => S.marked.has(t.id));
+}
+
+function toggleMark(t) {
+  if (!t) return;
+  if (S.marked.has(t.id)) S.marked.delete(t.id);
+  else S.marked.add(t.id);
+  render();
+}
+
+// markRange marks every row between the anchor and one index, so a long run
+// takes two clicks instead of twenty.
+function markRange(to) {
+  const rows = visible();
+  const from = Math.min(Math.max(S.anchor, 0), rows.length - 1);
+  const [lo, hi] = from <= to ? [from, to] : [to, from];
+  for (let i = lo; i <= hi; i++) S.marked.add(rows[i].id);
+  render();
+}
+
+function markAll() {
+  visible().forEach((t) => S.marked.add(t.id));
+  render();
+}
+
+function clearMarks() {
+  if (!S.marked.size) return;
+  S.marked.clear();
+  render();
+}
+
+// countWord keeps "1 task" and "3 tasks" in one place.
+function countWord(n) {
+  return n === 1 ? '1 task' : n + ' tasks';
+}
+
+// bulkField writes one field on every task, with one undo for the whole set.
+//
+// say builds the sentence from the count, rather than taking a finished
+// sentence. "Moved 3 tasks to #Home" and "Set p1 on 3 tasks" put the count in
+// different places, and only the caller knows which reads as English.
+function bulkField(tasks, field, value, say) {
+  if (!tasks.length) return;
+  const before = tasks.map((t) => ({ id: t.id, was: t[field] }));
+  tasks.forEach((t) => { t[field] = value; queue('task_update', { id: t.id, [field]: value }); });
+  S.marked.clear();
+  toast(say(countWord(tasks.length)), () => {
+    before.forEach((b) => {
+      const t = S.tasks.get(b.id);
+      if (!t) return;
+      t[field] = b.was;
+      queue('task_update', { id: b.id, [field]: b.was });
+    });
+    render();
+  });
+  render();
+}
+
+function bulkPriority(tasks, p) {
+  bulkField(tasks, 'priority', p, (what) => `Set p${p} on ${what}`);
+}
+
+function bulkProject(tasks, projectId) {
+  const p = S.projects.get(projectId);
+  const where = p && p.id !== 'inbox' ? '#' + p.name : 'the inbox';
+  bulkField(tasks, 'project_id', projectId, (what) => `Moved ${what} to ${where}`);
+}
+
+function bulkComplete(tasks) {
+  if (!tasks.length) return;
+  const before = tasks.map((t) => ({ ...t }));
+  tasks.forEach((t) => {
+    // A repeating task moves to its next date instead of closing, and only the
+    // server knows that date. Grey it out until the next sync answers.
+    if (t.rrule) t.pending = true;
+    else { t.state = 'done'; t.completed_at = new Date().toISOString(); }
+    queue('task_complete', { id: t.id });
+  });
+  S.marked.clear();
+  toast(`Completed ${countWord(tasks.length)}`, () => {
+    before.forEach((b) => { S.tasks.set(b.id, b); queue('task_uncomplete', { id: b.id }); });
+    render();
+  });
+  render();
+}
+
+function bulkDelete(tasks) {
+  if (!tasks.length) return;
+  const before = tasks.map((t) => ({ ...t }));
+  tasks.forEach((t) => { S.tasks.delete(t.id); queue('task_delete', { id: t.id }); });
+  S.marked.clear();
+  toast(`Deleted ${countWord(tasks.length)}`, () => {
+    before.forEach((b) => { S.tasks.set(b.id, b); queue('task_restore', { id: b.id }); });
+    render();
+  });
+  render();
+}
+
+// projectMenu moves a set of tasks. The inbox reads as "Inbox" and not as a
+// project name, because that is what every other screen calls it.
+function projectMenu(anchorEl, tasks) {
+  const items = [...S.projects.values()].map((p) => ({
+    label: p.id === 'inbox' ? 'Inbox' : p.name,
+    run: () => bulkProject(tasks, p.id),
+  }));
+  popup(anchorEl, items);
+}
+
+function priorityMenu(anchorEl, tasks) {
+  popup(anchorEl, [1, 2, 3, 4].map((n) => ({
+    label: 'p' + n,
+    hint: ['urgent', 'high', 'medium', 'none'][n - 1],
+    run: () => bulkPriority(tasks, n),
+  })));
 }
 
 function removeTask(t) {
@@ -430,12 +597,45 @@ function render() {
     [...list.querySelectorAll('.row')].forEach((el, i) => {
       el.querySelector('.box').onclick = (e) => { e.stopPropagation(); complete(rows[i]); };
       // The circle completes the task. Anywhere else in the row opens the
-      // detail, because that is what a pointer user expects.
-      el.querySelector('.body').onclick = (ev) => { ev.stopPropagation(); S.sel = i; openDetail(rows[i]); };
+      // detail, because that is what a pointer user expects. A held modifier
+      // means the user is picking a set instead, which is the same gesture
+      // every file manager and mail client uses.
+      el.querySelector('.body').onclick = (ev) => {
+        ev.stopPropagation();
+        S.sel = i;
+        if (ev.metaKey || ev.ctrlKey) { S.anchor = i; toggleMark(rows[i]); return; }
+        if (ev.shiftKey) { markRange(i); return; }
+        S.anchor = i;
+        openDetail(rows[i]);
+      };
       el.onclick = () => { S.sel = i; render(); };
     });
     const sel = list.querySelector('.row.sel');
     if (sel) sel.scrollIntoView({ block: 'nearest' });
+  }
+
+  const bar = document.querySelector('.bulk');
+  if (bar) bar.remove();
+  const picked = markedRows();
+  if (picked.length) {
+    const el = document.createElement('div');
+    el.className = 'bulk';
+    el.innerHTML = `<span class="n">${picked.length} selected</span>`
+      + `<button data-a="sched">Schedule</button><button data-a="prio">Priority</button>`
+      + `<button data-a="proj">Move</button><button data-a="done">Complete</button>`
+      + `<button data-a="del">Delete</button><button data-a="clear" class="ghost">Clear</button>`;
+    const act = {
+      sched: (b) => rescheduleMenu(b, picked),
+      prio: (b) => priorityMenu(b, picked),
+      proj: (b) => projectMenu(b, picked),
+      done: () => bulkComplete(picked),
+      del: () => bulkDelete(picked),
+      clear: () => clearMarks(),
+    };
+    [...el.querySelectorAll('button')].forEach((b) => {
+      b.onclick = (ev) => { ev.stopPropagation(); act[b.dataset.a](b); };
+    });
+    document.body.appendChild(el);
   }
 
   const old = document.querySelector('.toast');
@@ -483,6 +683,7 @@ function rowHTML(t, i) {
   const today = todayISO();
   const cls = ['row'];
   if (i === S.sel) cls.push('sel');
+  if (S.marked.has(t.id)) cls.push('mk');
   if (t.state === 'done') cls.push('done');
   if ((t.priority || 4) < 4) cls.push('p' + t.priority);
   const meta = [];
@@ -677,16 +878,30 @@ function wire() {
       rescheduleAll(overdueRows(), todayISO());
       return;
     }
+    if (e.key === 'A' || (e.key === 'a' && e.shiftKey)) { markAll(); return; }
+
+    // A selection changes what every action key means. One key does the same
+    // thing to one task or to twenty, and the bar at the bottom says which.
+    const many = S.marked.size > 0;
+    const set = many ? markedRows() : [];
+
     switch (e.key) {
       case 'q': case 'a': e.preventDefault(); $('qa').focus(); break;
       case 'j': case 'ArrowDown': S.sel = Math.min(S.sel + 1, rows.length - 1); render(); break;
       case 'k': case 'ArrowUp': S.sel = Math.max(S.sel - 1, 0); render(); break;
-      case 'x': case 'Enter': complete(cur); break;
-      case '1': case '2': case '3': case '4': setPriority(cur, Number(e.key)); break;
-      case 't': schedule(cur, 0); break;
-      case 'm': schedule(cur, 1); break;
-      case 'w': schedule(cur, 7); break;
-      case '#': case 'Backspace': case 'Delete': e.preventDefault(); removeTask(cur); break;
+      case 's': S.anchor = S.sel; toggleMark(cur); break;
+      case 'Escape': clearMarks(); break;
+      case 'x': case 'Enter': if (many) bulkComplete(set); else complete(cur); break;
+      case '1': case '2': case '3': case '4':
+        if (many) bulkPriority(set, Number(e.key)); else setPriority(cur, Number(e.key));
+        break;
+      case 't': if (many) rescheduleAll(set, plusDays(0)); else schedule(cur, 0); break;
+      case 'm': if (many) rescheduleAll(set, plusDays(1)); else schedule(cur, 1); break;
+      case 'w': if (many) rescheduleAll(set, plusDays(7)); else schedule(cur, 7); break;
+      case '#': case 'Backspace': case 'Delete':
+        e.preventDefault();
+        if (many) bulkDelete(set); else removeTask(cur);
+        break;
       case 'u': if (S.undo) { const u = S.undo.undo; S.undo = null; u(); } break;
       case 'e': case 'o': e.preventDefault(); openDetail(cur); break;
       case '?': showKeys(); break;
@@ -706,6 +921,11 @@ function showKeys() {
     <dt>1..4</dt><dd>set priority</dd>
     <dt>t / m / w</dt><dd>due today, tomorrow, next week</dd>
     <dt>T</dt><dd>move every overdue task in this view to today</dd>
+    <dt>s</dt><dd>pick this task for a bulk action</dd>
+    <dt>A</dt><dd>pick every task in this view</dd>
+    <dt>Escape</dt><dd>drop the selection</dd>
+    <dt>&#8984; / Ctrl + click</dt><dd>pick one task</dd>
+    <dt>Shift + click</dt><dd>pick a run of tasks</dd>
     <dt>e</dt><dd>open the task detail</dd>
     <dt>u</dt><dd>undo the last action</dd>
     <dt>r</dt><dd>sync now</dd>
