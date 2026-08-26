@@ -36,6 +36,12 @@ class ApiClient(private val settings: Settings) {
         ignoreUnknownKeys = true
         encodeDefaults = false
         explicitNulls = false
+        // A null where a list is declared uses the default instead of failing
+        // the whole parse. Go marshals a nil slice to `null`, and a server that
+        // does so once broke every answer, not just that field:
+        //   Expected start of the array '[', but had 'n' instead at path: $.applied
+        // The server is fixed. This keeps an older server working as well.
+        coerceInputValues = true
     }
 
     val jsonFormat: Json get() = json
