@@ -73,6 +73,7 @@ Run these commands in the repository root:
 go get golang.org/x/mobile/bind
 go install golang.org/x/mobile/cmd/gomobile@latest
 gomobile init
+mkdir -p android/app/libs
 gomobile bind -target=android -androidapi 26 \
   -javapkg io.github.lightheaded \
   -o android/app/libs/teha.aar ./mobile

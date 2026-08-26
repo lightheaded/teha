@@ -80,6 +80,9 @@ jobs:
           go get golang.org/x/mobile/bind
           go install golang.org/x/mobile/cmd/gomobile@latest
           gomobile init
+          # gomobile writes the file but will not create the directory, and
+          # android/app/libs is gitignored, so a fresh checkout never has it.
+          mkdir -p android/app/libs
           gomobile bind -target=android -androidapi 26 \
             -javapkg io.github.lightheaded \
             -o android/app/libs/teha.aar ./mobile
@@ -147,6 +150,9 @@ jobs:
           go get golang.org/x/mobile/bind
           go install golang.org/x/mobile/cmd/gomobile@latest
           gomobile init
+          # gomobile writes the file but will not create the directory, and
+          # android/app/libs is gitignored, so a fresh checkout never has it.
+          mkdir -p android/app/libs
           gomobile bind -target=android -androidapi 26 \
             -javapkg io.github.lightheaded \
             -o android/app/libs/teha.aar ./mobile
@@ -226,6 +232,9 @@ jobs:
           go get golang.org/x/mobile/bind
           go install golang.org/x/mobile/cmd/gomobile@latest
           gomobile init
+          # gomobile writes the file but will not create the directory, and
+          # android/app/libs is gitignored, so a fresh checkout never has it.
+          mkdir -p android/app/libs
           gomobile bind -target=android -androidapi 26 \
             -javapkg io.github.lightheaded \
             -o android/app/libs/teha.aar ./mobile
