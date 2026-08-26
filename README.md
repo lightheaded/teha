@@ -11,7 +11,7 @@ the data.
 | | |
 |---|---|
 | ![The Today view](docs/screenshots/today-light.png) | ![The same view in the dark theme](docs/screenshots/today-dark.png) |
-| **Today.** Overdue first, then the day groups. The sidebar counts every view. | **The dark theme.** The app follows the system setting. |
+| **Today.** Overdue first, then the day groups. The sidebar counts every view. **Reschedule** moves the whole overdue pile to one day, and `Shift+T` does it from the keyboard. | **The dark theme.** The app follows the system setting. |
 
 ![Quick add, with the parse hint](docs/screenshots/quick-add.png)
 

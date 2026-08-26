@@ -56,8 +56,18 @@ header .st{margin-left:auto;font-size:12.5px;color:var(--ink-3);font-family:var(
 .row .meta .lb{color:var(--ink-2)}
 .row .meta .pr{color:var(--ink-3)}
 .empty{padding:44px 12px;text-align:center;color:var(--ink-3)}
-.grp-head{position:sticky;top:0;background:var(--bg);padding:12px 8px 5px;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);z-index:1}
+.grp-head{position:sticky;top:0;background:var(--bg);padding:12px 8px 5px;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);z-index:1;display:flex;align-items:center;gap:8px}
 .grp-head:first-child{padding-top:6px}
+.grp-head .c{font-variant-numeric:tabular-nums;letter-spacing:0}
+.grp-head .resched{margin-left:auto;background:none;border:1px solid var(--line);border-radius:6px;padding:3px 9px;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);cursor:pointer}
+.grp-head .resched:hover{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.menu-back{position:fixed;inset:0;z-index:30}
+.menu{position:fixed;z-index:31;width:240px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:5px;box-shadow:0 10px 30px rgba(0,0,0,.24);display:grid;gap:1px}
+.menu button,.menu .pick{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;background:none;border:none;border-radius:6px;padding:8px 10px;font-size:14.5px;text-align:left;cursor:pointer}
+.menu button:hover,.menu button:focus-visible,.menu .pick:hover{background:var(--bg-2);outline:none}
+.menu .w{color:var(--ink-3);font-size:12.5px}
+.menu .pick{border-top:1px solid var(--line);border-radius:0 0 6px 6px;margin-top:4px;padding-top:10px}
+.menu .pick input{width:120px;padding:3px 5px;font:inherit;font-size:13px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:22px;background:var(--ink);color:var(--bg);padding:10px 14px;border-radius:8px;display:flex;gap:12px;align-items:center;font-size:14px;box-shadow:0 6px 24px rgba(0,0,0,.25)}
 .toast button{background:none;border:none;color:var(--accent);font-weight:600;cursor:pointer}
 .fab{position:fixed;right:18px;bottom:18px;width:52px;height:52px;border-radius:50%;border:none;background:var(--accent);color:var(--accent-ink);font-size:26px;box-shadow:0 6px 20px rgba(0,0,0,.25);cursor:pointer}

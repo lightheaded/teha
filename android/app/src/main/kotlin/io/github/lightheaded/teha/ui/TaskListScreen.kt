@@ -19,6 +19,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -28,14 +30,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,9 +51,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.lightheaded.teha.data.db.ProjectEntity
 import io.github.lightheaded.teha.data.db.TaskEntity
 import io.github.lightheaded.teha.ui.theme.priorityColor
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
+import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -57,11 +65,13 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
     val tasks by vm.tasks.collectAsStateWithLifecycle()
     val projects by vm.projects.collectAsStateWithLifecycle()
     val today by vm.todayIso.collectAsStateWithLifecycle()
+    val overdue by vm.overdue.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
 
     LaunchedEffect(state.message) {
         val message = state.message ?: return@LaunchedEffect
-        snackbar.showSnackbar(message)
+        val answer = snackbar.showSnackbar(message, actionLabel = state.undoLabel)
+        if (answer == SnackbarResult.ActionPerformed) vm.undoReschedule()
         vm.dismissMessage()
     }
 
@@ -118,6 +128,13 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
                     label = { Text("All open") },
                 )
             }
+            if (overdue.isNotEmpty()) {
+                OverdueBar(
+                    count = overdue.size,
+                    today = today,
+                    onPick = { vm.rescheduleOverdue(it) },
+                )
+            }
             PullToRefreshBox(
                 isRefreshing = state.syncing,
                 // announce = true: a person asked, so the result gets a
@@ -157,6 +174,75 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
                             )
                             HorizontalDivider()
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * OverdueBar says how many tasks are late and moves them all in one touch.
+ *
+ * The morning after a busy week a dozen tasks all say yesterday, and the only
+ * other way out is a dozen separate edits. Todoist puts the same button on the
+ * overdue section for the same reason.
+ *
+ * onPick receives an ISO day, or null for "no date".
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun OverdueBar(count: Int, today: String, onPick: (String?) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val day = runCatching { LocalDate.parse(today) }.getOrNull() ?: LocalDate.now()
+    // The same five choices as the web client, and each one shows the day it
+    // means. A label with no date behind it makes the user guess.
+    val choices: List<Pair<String, LocalDate?>> = listOf(
+        "Today" to day,
+        "Tomorrow" to day.plusDays(1),
+        "This weekend" to day.with(TemporalAdjusters.nextOrSame(DayOfWeek.SATURDAY)),
+        // next, not nextOrSame: on a Monday "next week" means the Monday after
+        // this one, and a choice that resolves to today is already above.
+        "Next week" to day.with(TemporalAdjusters.next(DayOfWeek.MONDAY)),
+        "No date" to null,
+    )
+    val dayFormat = remember { DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault()) }
+
+    Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 8.dp, top = 2.dp, bottom = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                if (count == 1) "1 overdue" else "$count overdue",
+                style = MaterialTheme.typography.labelLarge,
+                color = priorityColor(1),
+                modifier = Modifier.weight(1f),
+            )
+            Box {
+                TextButton(onClick = { open = true }) { Text("Reschedule") }
+                DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                    choices.forEach { (label, target) ->
+                        DropdownMenuItem(
+                            text = { Text(label) },
+                            trailingIcon = if (target != null) {
+                                {
+                                    Text(
+                                        target.format(dayFormat),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            } else {
+                                null
+                            },
+                            onClick = {
+                                open = false
+                                onPick(target?.toString())
+                            },
+                        )
                     }
                 }
             }
