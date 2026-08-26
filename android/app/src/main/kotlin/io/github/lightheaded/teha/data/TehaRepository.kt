@@ -29,6 +29,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.IOException
+import java.time.Instant
 import java.util.TimeZone
 
 /** The result of one add. */
@@ -47,6 +48,28 @@ data class AddResult(
  * the day away takes the time with it, and an undo puts both back.
  */
 data class DueChange(val id: String, val dueDate: String?, val dueTime: String?)
+
+/**
+ * Edit is one field of one task, changed by hand on the detail screen.
+ *
+ * One type per field, rather than one patch object with every field nullable.
+ * A nullable patch cannot say the difference between "leave the deadline
+ * alone" and "take the deadline away", and those are the two things a detail
+ * screen does most.
+ *
+ * A null inside a case therefore always means "take it away".
+ */
+sealed interface Edit {
+    data class Title(val value: String) : Edit
+    data class Notes(val value: String) : Edit
+    data class Priority(val value: Int) : Edit
+    data class Project(val id: String) : Edit
+    data class Labels(val values: List<String>) : Edit
+    data class Repeat(val rrule: String?) : Edit
+    data class Due(val date: String?, val time: String?) : Edit
+    data class Starts(val date: String?) : Edit
+    data class Deadline(val date: String?) : Edit
+}
 
 /** The result of one sync. */
 sealed interface SyncResult {
@@ -78,6 +101,8 @@ class TehaRepository(context: Context) {
 
     fun todayTasks(today: String): Flow<List<TaskEntity>> = db.tasks().today(today)
     fun openTasks(): Flow<List<TaskEntity>> = db.tasks().allOpen()
+    fun task(id: String): Flow<TaskEntity?> = db.tasks().byIdFlow(id)
+    fun subtasks(parentId: String): Flow<List<TaskEntity>> = db.tasks().children(parentId)
 
     suspend fun projectsNow(): List<ProjectEntity> = db.projects().allNow()
 
@@ -216,6 +241,156 @@ class TehaRepository(context: Context) {
                 },
             )
         }
+    }
+
+    /**
+     * edit changes one field of one task.
+     *
+     * The local row changes first and the command goes to the outbox second,
+     * so the screen answers a touch with no network. The server keeps every
+     * field a command does not name, so each command carries one field only.
+     */
+    suspend fun edit(taskId: String, change: Edit) {
+        val task = db.tasks().byId(taskId) ?: return
+        val row: TaskEntity
+        val args: JsonObject
+        when (change) {
+            is Edit.Title -> {
+                val title = change.value.trim()
+                if (title.isEmpty()) return
+                row = task.copy(title = title)
+                args = buildJsonObject { put("id", taskId); put("title", title) }
+            }
+            is Edit.Notes -> {
+                row = task.copy(description = change.value)
+                args = buildJsonObject { put("id", taskId); put("description", change.value) }
+            }
+            is Edit.Priority -> {
+                row = task.copy(priority = change.value)
+                args = buildJsonObject { put("id", taskId); put("priority", change.value) }
+            }
+            is Edit.Project -> {
+                row = task.copy(projectId = change.id)
+                args = buildJsonObject { put("id", taskId); put("project_id", change.id) }
+            }
+            is Edit.Labels -> {
+                row = task.copy(labels = change.values)
+                args = buildJsonObject {
+                    put("id", taskId)
+                    put("labels", buildJsonArray { change.values.forEach { add(it) } })
+                }
+            }
+            is Edit.Repeat -> {
+                row = task.copy(rrule = change.rrule)
+                args = field(taskId, "rrule", change.rrule)
+            }
+            is Edit.Due -> {
+                // The time rides with the day, as it does in setDue. A row
+                // that holds a time and no day is a row no view can print.
+                row = task.copy(dueDate = change.date, dueTime = change.time)
+                args = buildJsonObject {
+                    put("id", taskId)
+                    if (change.date == null) {
+                        put("clear", buildJsonArray { add("due_date"); add("due_time") })
+                    } else {
+                        put("due_date", change.date)
+                        if (change.time != null) {
+                            put("due_time", change.time)
+                        } else {
+                            put("clear", buildJsonArray { add("due_time") })
+                        }
+                    }
+                }
+            }
+            is Edit.Starts -> {
+                row = task.copy(startDate = change.date)
+                args = field(taskId, "start_date", change.date)
+            }
+            is Edit.Deadline -> {
+                row = task.copy(deadline = change.date)
+                args = field(taskId, "deadline", change.date)
+            }
+        }
+        db.tasks().upsertOne(row)
+        queue("task_update", args)
+    }
+
+    /** field builds a task_update that either sets one field or clears it. */
+    private fun field(taskId: String, name: String, value: String?): JsonObject =
+        buildJsonObject {
+            put("id", taskId)
+            if (value == null) {
+                put("clear", buildJsonArray { add(name) })
+            } else {
+                put(name, value)
+            }
+        }
+
+    /**
+     * addSubtask writes one child under a task.
+     *
+     * The child takes the parent's project. A sub-task in a different project
+     * from its parent is a row that shows up in a list where its parent is
+     * absent, which reads as an orphan.
+     */
+    suspend fun addSubtask(parent: TaskEntity, title: String): String? {
+        val clean = title.trim()
+        if (clean.isEmpty()) return null
+        val id = Binding.newId("t")
+        db.tasks().upsertOne(
+            TaskEntity(
+                id = id,
+                projectId = parent.projectId,
+                parentId = parent.id,
+                orderKey = "m",
+                title = clean,
+                description = "",
+                priority = 4,
+                dueDate = null,
+                dueTime = null,
+                dueTz = null,
+                rrule = null,
+                rruleFromCompletion = false,
+                startDate = null,
+                deadline = null,
+                durationMin = null,
+                state = "open",
+                completedAt = null,
+                deletedAt = null,
+                labels = emptyList(),
+                version = 0,
+            )
+        )
+        queue(
+            "task_add",
+            buildJsonObject {
+                put("id", id)
+                put("project_id", parent.projectId)
+                put("parent_id", parent.id)
+                put("title", clean)
+            },
+        )
+        return id
+    }
+
+    /**
+     * delete hides a task, here and on the server.
+     *
+     * A delete is a soft delete on both sides: the server sets deleted_at and
+     * still returns the row, so the local row does the same. Marking it, and
+     * not removing it, is what lets restore put it back with no pull.
+     */
+    suspend fun delete(taskId: String) {
+        val task = db.tasks().byId(taskId) ?: return
+        db.tasks().upsertOne(task.copy(deletedAt = Instant.now().toString()))
+        queue("task_delete", buildJsonObject { put("id", taskId) })
+    }
+
+    /** restore undoes a delete. */
+    suspend fun restore(taskId: String) {
+        val task = db.tasks().byId(taskId) ?: return
+        db.tasks().upsertOne(task.copy(deletedAt = null))
+        queue("task_restore", buildJsonObject { put("id", taskId) })
     }
 
     private suspend fun queue(type: String, args: JsonObject) {

@@ -19,6 +19,23 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE id = :id")
     suspend fun byId(id: String): TaskEntity?
 
+    // The detail screen watches one row. A sync that pulls a newer version of
+    // the same task must redraw the open screen, or the user edits a field
+    // while looking at a value the server has already replaced.
+    @Query("SELECT * FROM tasks WHERE id = :id")
+    fun byIdFlow(id: String): Flow<TaskEntity?>
+
+    // Sub-tasks of one task. A done child stays in the list, struck through,
+    // because a checklist that hides what is finished loses the record of it.
+    @Query(
+        """
+        SELECT * FROM tasks
+        WHERE deletedAt IS NULL AND parentId = :parentId
+        ORDER BY (state != 'open'), orderKey ASC
+        """
+    )
+    fun children(parentId: String): Flow<List<TaskEntity>>
+
     // The Today view. An overdue day sorts before today, so the list needs no
     // second query and no grouping pass.
     @Query(

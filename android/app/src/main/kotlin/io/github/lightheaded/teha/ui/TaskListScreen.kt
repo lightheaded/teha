@@ -3,6 +3,7 @@
 package io.github.lightheaded.teha.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -51,12 +52,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.lightheaded.teha.data.db.ProjectEntity
 import io.github.lightheaded.teha.data.db.TaskEntity
 import io.github.lightheaded.teha.ui.theme.priorityColor
-import java.time.DayOfWeek
 import java.time.LocalDate
-import java.time.format.DateTimeFormatter
-import java.time.format.TextStyle
-import java.time.temporal.TemporalAdjusters
-import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -66,12 +62,15 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
     val projects by vm.projects.collectAsStateWithLifecycle()
     val today by vm.todayIso.collectAsStateWithLifecycle()
     val overdue by vm.overdue.collectAsStateWithLifecycle()
+    val detail by vm.detail.collectAsStateWithLifecycle()
+    val subtasks by vm.detailSubtasks.collectAsStateWithLifecycle()
+    val labels by vm.labels.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
 
     LaunchedEffect(state.message) {
         val message = state.message ?: return@LaunchedEffect
         val answer = snackbar.showSnackbar(message, actionLabel = state.undoLabel)
-        if (answer == SnackbarResult.ActionPerformed) vm.undoReschedule()
+        if (answer == SnackbarResult.ActionPerformed) vm.undo()
         vm.dismissMessage()
     }
 
@@ -171,6 +170,7 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
                                 project = projects.firstOrNull { it.id == task.projectId },
                                 today = today,
                                 onToggle = { vm.toggle(task) },
+                                onOpen = { vm.openDetail(task) },
                             )
                             HorizontalDivider()
                         }
@@ -178,6 +178,24 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
                 }
             }
         }
+    }
+
+    // The sheet lives outside the Scaffold content, so it draws over the quick
+    // add bar and the snackbar rather than inside the list.
+    val openTask = detail
+    if (openTask != null) {
+        TaskDetailSheet(
+            task = openTask,
+            subtasks = subtasks,
+            projects = projects,
+            knownLabels = labels.map { it.name },
+            today = today,
+            onEdit = vm::edit,
+            onToggleTask = vm::toggle,
+            onAddSubtask = vm::addSubtask,
+            onDelete = vm::deleteOpenTask,
+            onClose = vm::onLeave,
+        )
     }
 }
 
@@ -194,19 +212,9 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
 @Composable
 private fun OverdueBar(count: Int, today: String, onPick: (String?) -> Unit) {
     var open by remember { mutableStateOf(false) }
-    val day = runCatching { LocalDate.parse(today) }.getOrNull() ?: LocalDate.now()
-    // The same five choices as the web client, and each one shows the day it
-    // means. A label with no date behind it makes the user guess.
-    val choices: List<Pair<String, LocalDate?>> = listOf(
-        "Today" to day,
-        "Tomorrow" to day.plusDays(1),
-        "This weekend" to day.with(TemporalAdjusters.nextOrSame(DayOfWeek.SATURDAY)),
-        // next, not nextOrSame: on a Monday "next week" means the Monday after
-        // this one, and a choice that resolves to today is already above.
-        "Next week" to day.with(TemporalAdjusters.next(DayOfWeek.MONDAY)),
-        "No date" to null,
-    )
-    val dayFormat = remember { DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault()) }
+    // The same five choices as the web client and as the detail screen. They
+    // live in Days.kt, so no screen can drift from the others.
+    val choices = dayChoices(parseDay(today) ?: LocalDate.now())
 
     Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
         Row(
@@ -256,10 +264,15 @@ private fun TaskRow(
     project: ProjectEntity?,
     today: String,
     onToggle: () -> Unit,
+    onOpen: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            // The whole row opens the task, and the checkbox alone completes
+            // it. The checkbox sits inside this clickable area, so it declares
+            // its own handler and swallows the touch first.
+            .clickable(onClick = onOpen)
             .padding(start = 4.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -308,21 +321,3 @@ private fun PriorityDot(priority: Int) {
     )
 }
 
-private fun isOverdue(due: String?, today: String): Boolean =
-    due != null && due < today
-
-/** dueLabel prints a day the way a phone user reads it, not as an ISO string. */
-private fun dueLabel(due: String, time: String?, today: String): String {
-    val day = runCatching { LocalDate.parse(due) }.getOrNull() ?: return due
-    val now = runCatching { LocalDate.parse(today) }.getOrNull() ?: return due
-    val name = when {
-        day == now -> "today"
-        day == now.plusDays(1) -> "tomorrow"
-        day == now.minusDays(1) -> "yesterday"
-        day.isBefore(now) && day.isAfter(now.minusDays(7)) ->
-            day.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault())
-        day.year == now.year -> day.format(DateTimeFormatter.ofPattern("d MMM"))
-        else -> due
-    }
-    return if (time.isNullOrEmpty()) name else "$name $time"
-}
