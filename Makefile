@@ -15,7 +15,7 @@ ADDR    ?= 127.0.0.1:8637
 .PHONY: build test run seed lint docker clean
 
 build:
-	go build -trimpath -ldflags "-s -w" -o $(BINARY) ./cmd/teha
+	go build -trimpath -ldflags "-s -w -X main.buildVersion=$(VERSION)" -o $(BINARY) ./cmd/teha
 
 test:
 	go test ./...

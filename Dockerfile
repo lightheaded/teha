@@ -18,11 +18,11 @@ RUN go mod download
 
 COPY . .
 
-# VERSION is accepted for build metadata. main.go prints a hard-coded version
-# string and has no `version` variable, so the linker cannot stamp it yet.
+# VERSION reaches the binary, not only the image label, so `teha -version`
+# inside a running container names the build that a deployment pinned.
 ARG VERSION=dev
 ENV CGO_ENABLED=0 GOOS=linux
-RUN go build -trimpath -ldflags "-s -w" -o /out/teha ./cmd/teha
+RUN go build -trimpath -ldflags "-s -w -X main.buildVersion=${VERSION}" -o /out/teha ./cmd/teha
 
 # The health probe. distroless/static holds no shell and no curl, so the image
 # carries one small static client that calls /v1/health.

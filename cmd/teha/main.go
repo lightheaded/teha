@@ -26,6 +26,16 @@ import (
 	"github.com/lightheaded/teha/internal/webui"
 )
 
+// buildVersion is set at link time by the release job, with
+//
+//	-ldflags "-X main.buildVersion=<version>"
+//
+// A build that does not set it says so, rather than claiming a release number
+// it does not have. It must stay a string: -X does nothing to any other type,
+// and it fails silently, so a flag of the same name would leave every release
+// binary reporting the wrong version.
+var buildVersion = "dev (no version set at build time)"
+
 func main() {
 	// Subcommands come before the flag set, so "teha add ..." never collides
 	// with a server flag.
@@ -53,7 +63,7 @@ func main() {
 	flag.Parse()
 
 	if *version {
-		fmt.Println("teha 0.1.0 (proof of concept)")
+		fmt.Println("teha " + buildVersion)
 		return
 	}
 

@@ -125,15 +125,29 @@ repository. Releases separate by tag prefix, not by repository:
 
 | Artifact | Versioned by | Published to |
 |---|---|---|
-| the server image | the commit hash | `ghcr.io/lightheaded/teha:<commit>` |
-| the Android APK | `v<base>.<CI run number>` | a GitHub Release, for Obtainium |
+| the server image | the commit hash | `ghcr.io/lightheaded/teha:<commit>`, and named by digest in the release |
+| the command line and server binary | the release version | five files in the GitHub Release |
+| the Android APK | `v<base>.<CI run number>` | the same GitHub Release, for Obtainium |
 
-**A GitHub Release in this repository is always an Android build, and never a
-server build.** The server is versioned by its image tag in the registry, which
-is the artifact store it already needs. That rule exists for one reason:
-Obtainium follows the Latest release and expects an APK asset there. A server
-release would take the Latest pointer and hand every phone a release with no
-APK in it.
+**Amended 2026-08-26.** This entry first said that a release is always an
+Android build and never a server build. That was the wrong rule for the right
+reason. A release is now a snapshot of the WHOLE product at one commit: the
+APK, the binary for five platforms, and the digest of the container image.
+
+The constraint that mattered was never "keep the server out". It is this:
+**every release must carry an APK, and the tag must be exactly `v` plus the
+version.** Obtainium follows the Latest release, reads the version from the tag
+name, and expects an APK asset there. Adding more assets to the same release
+breaks none of that. Publishing a separate server-only release would, because
+it would take the Latest pointer and hand every phone a release with no APK.
+
+A container image cannot be a release asset, because it lives in a registry
+rather than in a file. So the release names it by digest and refuses to publish
+when it is absent. A release that points at an image nobody pushed is worse than
+a late release.
+
+The server and the command line client are one binary, so one artifact serves
+both. Windows is in the list because the author runs a Windows desktop.
 
 **Why one repository.** D-002 binds the Go parser into the Android app with
 `gomobile bind`. Inside one module that binding reads the working tree. Across
