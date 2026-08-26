@@ -127,7 +127,12 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "at most 200 commands per request")
 		return
 	}
-	var results []store.Result
+	// An empty slice, not a nil one. A nil slice marshals to `null`, and a
+	// client that declares this field as a list then fails to parse the whole
+	// answer. The Android app hit exactly that on its first connection test:
+	//   Expected start of the array '[', but had 'n' instead at path: $.applied
+	// A list field in this API is always a list, never null.
+	results := []store.Result{}
 	var err error
 	if len(req.Commands) > 0 {
 		_, results, err = s.Store.Apply(req.Commands)
@@ -146,8 +151,19 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, syncResponse{
 		Version: delta.Version, Applied: results,
-		Projects: delta.Projects, Labels: delta.Labels, Tasks: delta.Tasks,
+		Projects: orEmpty(delta.Projects), Labels: orEmpty(delta.Labels),
+		Tasks: orEmpty(delta.Tasks),
 	})
+}
+
+// orEmpty turns a nil slice into an empty one, so that a list field never
+// marshals to `null`. Go makes that distinction and JSON clients mostly do not:
+// a typed client declares `List<T>` and a null answer fails the whole parse.
+func orEmpty[T any](v []T) []T {
+	if v == nil {
+		return []T{}
+	}
+	return v
 }
 
 // --- reads ------------------------------------------------------------------

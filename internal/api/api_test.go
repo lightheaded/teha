@@ -261,3 +261,51 @@ func itoa(v int64) string {
 	}
 	return string(b)
 }
+
+// A list field must never be null, whatever the request contained.
+//
+// Go marshals a nil slice to `null`, and a typed client that declares the field
+// as a list then fails to parse the WHOLE answer, not just that field. The
+// Android app hit this on its first connection test, which sends since=0 and no
+// commands:
+//
+//	Expected start of the array '[', but had 'n' instead at path: $.applied
+//
+// The empty-database case is the one that broke, so it is the one under test.
+func TestSyncNeverReturnsNullLists(t *testing.T) {
+	_, ts := newServer(t, "")
+	defer ts.Close()
+
+	cases := map[string]string{
+		"no commands, empty database": `{"since":0,"commands":[]}`,
+		"commands omitted":            `{"since":0}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			code, out := do(t, ts, "POST", "/v1/sync", "", body)
+			if code != http.StatusOK {
+				t.Fatalf("status %d: %s", code, out)
+			}
+			for _, field := range []string{"applied", "projects", "labels", "tasks"} {
+				if strings.Contains(out, `"`+field+`":null`) {
+					t.Errorf("%q is null in the answer, and must be an empty list: %s", field, out)
+				}
+			}
+			// Decode into the shape a typed client uses. A nil slice would have
+			// been caught above, so this guards the rest of the contract.
+			var got struct {
+				Version  int64           `json:"version"`
+				Applied  []store.Result  `json:"applied"`
+				Projects []store.Project `json:"projects"`
+				Labels   []store.Label   `json:"labels"`
+				Tasks    []store.Task    `json:"tasks"`
+			}
+			if err := json.Unmarshal([]byte(out), &got); err != nil {
+				t.Fatalf("cannot decode: %v", err)
+			}
+			if got.Applied == nil || got.Projects == nil || got.Labels == nil || got.Tasks == nil {
+				t.Errorf("a list decoded to nil: %s", out)
+			}
+		})
+	}
+}
