@@ -315,6 +315,32 @@ class TehaRepository(context: Context) {
         queue("task_update", args)
     }
 
+    /**
+     * editEach applies one change per task, in the order given.
+     *
+     * D-008: a bulk action is many commands, never one command that carries a
+     * query. Each pair names its own task, so the outbox can replay the whole
+     * set tomorrow and get the same result. The list is a list of pairs and
+     * not one change for many ids, because an undo has to put a different old
+     * value back on each task.
+     *
+     * Every write lands before any network call, so one sync carries the whole
+     * set in one request.
+     */
+    suspend fun editEach(changes: List<Pair<String, Edit>>) {
+        changes.forEach { (id, change) -> edit(id, change) }
+    }
+
+    /** completeMany closes a set of tasks. */
+    suspend fun completeMany(ids: List<String>) = ids.forEach { complete(it) }
+
+    /** uncompleteMany reopens a set of tasks, which is how a completion undoes. */
+    suspend fun uncompleteMany(ids: List<String>) = ids.forEach { uncomplete(it) }
+
+    suspend fun deleteMany(ids: List<String>) = ids.forEach { delete(it) }
+
+    suspend fun restoreMany(ids: List<String>) = ids.forEach { restore(it) }
+
     /** field builds a task_update that either sets one field or clears it. */
     private fun field(taskId: String, name: String, value: String?): JsonObject =
         buildJsonObject {

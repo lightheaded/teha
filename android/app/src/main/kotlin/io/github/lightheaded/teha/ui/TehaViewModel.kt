@@ -160,6 +160,136 @@ class TehaViewModel(app: Application) : AndroidViewModel(app) {
         _state.value = _state.value.copy(message = null, undoLabel = null)
     }
 
+    // --- a set of tasks ------------------------------------------------------
+    //
+    // A long press starts a selection and a tap then adds to it, which is what
+    // every phone gallery and mail app does. While a selection exists a tap
+    // never opens the detail screen, so nobody loses a set by mis-touching one
+    // row.
+
+    private val _marked = MutableStateFlow<Set<String>>(emptySet())
+    val marked: StateFlow<Set<String>> = _marked.asStateFlow()
+
+    fun toggleMark(task: TaskEntity) {
+        val now = _marked.value
+        _marked.value = if (task.id in now) now - task.id else now + task.id
+    }
+
+    fun clearMarks() {
+        _marked.value = emptySet()
+    }
+
+    /**
+     * markedTasks are the marked tasks that are on the screen.
+     *
+     * On the screen, not in the account. A mark survives a change of view, and
+     * acting on a row the user can no longer see is a change nobody can check.
+     */
+    private fun markedTasks(): List<TaskEntity> {
+        val ids = _marked.value
+        return tasks.value.filter { it.id in ids }
+    }
+
+    /** bulkPriority sets one priority on the whole set. */
+    fun bulkPriority(priority: Int) {
+        val set = markedTasks()
+        if (set.isEmpty()) return
+        val back = set.map { it.id to Edit.Priority(it.priority) as Edit }
+        run(
+            set = set,
+            said = "Set p$priority on",
+            work = { repo.editEach(set.map { it.id to Edit.Priority(priority) }) },
+            undo = { repo.editEach(back); "Put the priority back on ${countWord(back.size)}" },
+        )
+    }
+
+    /** bulkProject moves the whole set. */
+    fun bulkProject(projectId: String, name: String) {
+        val set = markedTasks()
+        if (set.isEmpty()) return
+        val back = set.map { it.id to Edit.Project(it.projectId) as Edit }
+        run(
+            set = set,
+            said = "Moved",
+            tail = " to $name",
+            work = { repo.editEach(set.map { it.id to Edit.Project(projectId) }) },
+            undo = { repo.editEach(back); "Moved ${countWord(back.size)} back" },
+        )
+    }
+
+    /** bulkReschedule moves the whole set onto one day, or takes the day away. */
+    fun bulkReschedule(date: String?) {
+        val set = markedTasks()
+        if (set.isEmpty()) return
+        val back = set.map { DueChange(it.id, it.dueDate, it.dueTime) }
+        run(
+            set = set,
+            said = if (date == null) "Took the date off" else "Moved",
+            tail = if (date == null) "" else " to ${whenWord(date, today.value)}",
+            work = {
+                repo.setDue(set.map { DueChange(it.id, date, if (date == null) null else it.dueTime) })
+            },
+            undo = { repo.setDue(back); "Put ${countWord(back.size)} back" },
+        )
+    }
+
+    fun bulkComplete() {
+        val set = markedTasks()
+        if (set.isEmpty()) return
+        val ids = set.map { it.id }
+        run(
+            set = set,
+            said = "Completed",
+            work = { repo.completeMany(ids) },
+            undo = { repo.uncompleteMany(ids); "Reopened ${countWord(ids.size)}" },
+        )
+    }
+
+    fun bulkDelete() {
+        val set = markedTasks()
+        if (set.isEmpty()) return
+        val ids = set.map { it.id }
+        run(
+            set = set,
+            said = "Deleted",
+            work = { repo.deleteMany(ids) },
+            undo = { repo.restoreMany(ids); "Put ${countWord(ids.size)} back" },
+        )
+    }
+
+    /**
+     * run applies one bulk action, records its undo and says what it did.
+     *
+     * The undo arrives as an argument rather than being assigned after the
+     * call. viewModelScope dispatches on the immediate main dispatcher, so the
+     * work below can finish before the caller's next line runs, and an undo
+     * assigned on that next line would arrive after the snackbar offered it.
+     *
+     * The marks drop here, for every action. A set that survived its own
+     * action was still marked for the next one, so a second action hit tasks
+     * the user believed they had already dealt with.
+     */
+    private fun run(
+        set: List<TaskEntity>,
+        said: String,
+        tail: String = "",
+        work: suspend () -> Unit,
+        undo: suspend () -> String,
+    ) {
+        clearMarks()
+        pendingUndo = undo
+        viewModelScope.launch {
+            work()
+            _state.value = _state.value.copy(
+                message = "$said ${countWord(set.size)}$tail",
+                undoLabel = "Undo",
+            )
+            sync()
+        }
+    }
+
+    private fun countWord(n: Int): String = if (n == 1) "1 task" else "$n tasks"
+
     // --- reschedule ---------------------------------------------------------
 
     // pendingUndo is the work that takes the last change back, and the
