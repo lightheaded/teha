@@ -1,0 +1,85 @@
+# Refuse a commit whose author address is a real mailbox.
+#
+# This repository is public, and it is published under an alias. A commit
+# carries its author address forever, and GitHub shows it on every line of
+# blame. One commit made from a machine with the wrong git identity therefore
+# undoes the alias permanently.
+#
+# The rule is deliberately shaped so that it names no address: an author
+# address must end in @users.noreply.github.com. That catches every real
+# mailbox without writing one into a public file, and it points a contributor
+# at the same setting.
+#
+# GitHub issues the noreply form to every account, at
+# Settings -> Emails -> Keep my email addresses private.
+
+name: identity
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  authors:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Every commit that this push adds must be checked, not only the tip.
+          fetch-depth: 0
+
+      - name: Check the author address of every new commit
+        env:
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+
+          # Work out which commits are new. A new branch, a force push and a
+          # first push all report an all-zero or missing base, and there is then
+          # nothing to compare against, so check the last 50 commits instead.
+          zero="0000000000000000000000000000000000000000"
+          range=""
+          if [ -n "${BASE:-}" ]; then
+            range="$BASE..HEAD"
+          elif [ -n "${BEFORE:-}" ] && [ "$BEFORE" != "$zero" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            range="$BEFORE..HEAD"
+          else
+            range="HEAD~49..HEAD"
+            git rev-parse "HEAD~49" >/dev/null 2>&1 || range="HEAD"
+          fi
+
+          bad=0
+          while IFS='|' read -r sha email subject; do
+            [ -z "$sha" ] && continue
+            case "$email" in
+              *@users.noreply.github.com) ;;
+              *)
+                echo "::error::$sha carries a real author address. Subject: $subject"
+                bad=1
+                ;;
+            esac
+          done < <(git log --format='%H|%ae|%s' "$range")
+
+          if [ "$bad" -ne 0 ]; then
+            cat >&2 <<'MSG'
+
+          One commit carries an author address that is not the GitHub noreply
+          form. This repository is public, so that address is now permanent in
+          the history and in every line of blame.
+
+          Fix the machine that made it:
+
+            git config user.email '<your id>+<your login>@users.noreply.github.com'
+
+          Then rewrite the commits that are wrong, and force push the branch.
+          Do this before anyone else fetches it.
+
+          MSG
+            exit 1
+          fi
+
+          echo "Every new commit uses a noreply author address."
