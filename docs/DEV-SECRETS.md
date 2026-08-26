@@ -1,44 +1,122 @@
 # Local development secrets
 
-The importer needs a Todoist API token. A token in a plain file is a token that
-leaks, so it lives encrypted with [SOPS](https://getsops.io) and
-[age](https://age-encryption.org), and the age private key lives in a password
-manager.
+**Every secret this project needs is in one encrypted file on the machine. No
+password manager prompt is necessary for any command in this repository.**
 
-**This applies to local development only.** The server in a cluster reads its
-own secret from the cluster, not from this file. Nothing here belongs in a
-container image or in a repository.
+If you reach for `op`, stop and read this page. The value is almost certainly
+already here, and a prompt interrupts whoever owns the machine.
 
-## What the setup looks like
+```sh
+scripts/secret --list          # the names
+scripts/secret device_token    # one value
+```
+
+## Where it lives
 
 ```
 ~/.config/teha/
-  age.key            the private key, mode 600, also stored in the password manager
-  age.pub            the public recipient, not secret
+  age.key            the private key, mode 600. Also in the password manager.
+  age.pub            the public recipient. Not secret.
   .sops.yaml         the rule that says which recipient encrypts a *.enc.yaml file
-  todoist.enc.yaml   the token, encrypted
+  secrets.enc.yaml   every secret, encrypted
+  token              the CLI client's own token file, mode 600
+  signing/README.txt the signing key fingerprint. No secret in it.
 ```
 
-The repository never holds any of these files.
+The repository holds none of these files.
 
-## Set it up once
+| Name | What it is |
+|---|---|
+| `device_token` | The bearer token for `teha.example`. The same value is in the cluster secret. |
+| `todoist_token` | The Todoist API token, for the importer. |
+| `keystore_password` | The Android release keystore password. It is also the key password. |
+| `keystore_alias` | `teha`. Not a secret, kept here so no command has to guess. |
+| `keystore_jks_base64` | The Android release keystore itself, base64 encoded. |
+
+## Read a secret
+
+The helper prints one value to standard output and nothing else:
+
+```sh
+export TODOIST_TOKEN="$(scripts/secret todoist_token)"
+teha import --token "$(scripts/secret todoist_token)"
+```
+
+Never pass a secret as a command argument on a shared machine. An argument is
+visible in the process list to every other process. Prefer an environment
+variable or a pipe.
+
+To get the keystore back as a real file, for example to check a signature:
+
+```sh
+f=$(scripts/secret --file keystore_jks)
+...use "$f"...
+rm -f "$f"
+```
+
+The file is mode 600 in a temporary directory. Remove it when you are done.
+
+`keytool` on macOS is a stub that prints nothing, so a real check needs a
+container:
+
+```sh
+d=$(mktemp -d)
+scripts/secret --file keystore_jks | xargs -I{} cp {} "$d/ks.jks"
+scripts/secret keystore_password > "$d/pw"
+docker run --rm -v "$d":/w:ro eclipse-temurin:21-jdk-jammy \
+  sh -c 'keytool -list -v -keystore /w/ks.jks -storepass "$(cat /w/pw)"'
+rm -rf "$d"
+```
+
+The password reaches `keytool` from a file inside the container, not as an
+argument on the host. An argument would be readable in the host process list.
+
+## Add or change a secret
+
+```sh
+cd ~/.config/teha
+sops secrets.enc.yaml          # opens the plaintext in $EDITOR, encrypts on save
+```
+
+`sops` never writes the plaintext to disk. Do not build the file with a shell
+redirect unless you are creating it for the first time.
+
+## What is NOT here, and why
+
+**The age private key.** It decrypts everything else, so a copy of it inside
+the encrypted store would be a lock whose key hangs on the lock. It lives in
+two places: `~/.config/teha/age.key` on each machine, and the password manager
+as the off-machine copy. Losing every copy means losing every secret above.
+
+**The git SSH key and the git signing key.** Both are plain files under
+`~/.ssh`, which is how every SSH client expects to find them. Moving them into
+SOPS would mean decrypting them to a temporary file for every push.
+
+**The GitHub Actions secrets** `TEHA_KEYSTORE_BASE64` and
+`TEHA_KEYSTORE_PASSWORD`. GitHub cannot read a secret back out, so those are
+not a backup. They only let CI sign a release.
+
+## Set it up on a new machine
 
 Install the tools:
 
 ```sh
-brew install sops age
+brew install sops age        # or: nix profile install nixpkgs#sops nixpkgs#age
 ```
 
-Make the directory and the key:
+Make the directory and restore the key from the password manager:
 
 ```sh
 mkdir -p ~/.config/teha && chmod 700 ~/.config/teha
-cd ~/.config/teha
-age-keygen -o age.key && chmod 600 age.key
-age-keygen -y age.key > age.pub
+umask 077
+cat > ~/.config/teha/age.key    # paste the key, then press Ctrl-D
+age-keygen -y ~/.config/teha/age.key > ~/.config/teha/age.pub
 ```
 
-Write the rule that tells SOPS which recipient to use:
+`umask 077` before the redirect, not `chmod` after it. A `chmod` afterwards
+leaves the key world readable for the moment in between.
+
+Write the encryption rule:
 
 ```sh
 cat > ~/.config/teha/.sops.yaml <<EOF
@@ -48,64 +126,41 @@ creation_rules:
 EOF
 ```
 
-Put the token into an encrypted file. The plain value never reaches the shell
-history, because it arrives from a file that is deleted afterward:
+Copy `secrets.enc.yaml` from another machine. The file is encrypted, so any
+channel does: `ssh other 'cat ~/.config/teha/secrets.enc.yaml' >
+~/.config/teha/secrets.enc.yaml`, then `chmod 600` it.
+
+Check the result:
 
 ```sh
-printf 'todoist_token: %s\n' "$(tr -d '\n' < /path/to/token)" > ~/.config/teha/todoist.enc.yaml
-chmod 600 ~/.config/teha/todoist.enc.yaml
-cd ~/.config/teha && SOPS_AGE_KEY_FILE=$PWD/age.key sops -e -i todoist.enc.yaml
-shred -u /path/to/token
+scripts/secret --list
+scripts/secret keystore_alias    # prints: teha
 ```
 
-Store the private key in the password manager, so a new machine needs no copy
-over the network:
+## The CLI token file
+
+`~/.config/teha/token` is separate on purpose. The `teha` command line client
+reads it directly, the way `ssh` reads `~/.ssh/id_rsa`: a mode 600 file in a
+mode 700 directory, with no other tool in the path. A released binary must not
+depend on `sops`.
+
+It holds the same value as `device_token`, so it can be rebuilt at any time:
 
 ```sh
-op document create ~/.config/teha/age.key \
-  --title "<your item title>" --vault "<your vault>" --file-name teha-age.key
+umask 077 && scripts/secret device_token > ~/.config/teha/token
 ```
 
-## Use it
+## The cluster keeps its own copy
 
-Read the token straight into the command that needs it. The value stays in a
-pipe, so no file and no shell history holds it:
+The server in the cluster reads `TEHA_TOKEN` from
+`the encrypted store of the cluster` in the private repository, encrypted
+to the master age key of that store. Nothing on this page reaches a container image or a
+repository.
+
+To read a cluster secret, or to run `kubectl`, use the private repository:
 
 ```sh
-cd ~/.config/teha
-export SOPS_AGE_KEY_FILE=$HOME/.config/teha/age.key
-
-teha import --db ~/teha.db \
-  --token "$(sops -d todoist.enc.yaml | sed -n 's/^todoist_token: //p')"
+cd the private repository
+sops -d the encrypted store of the cluster
+kubectl -n teha get pods
 ```
-
-A shell function makes this a habit rather than a lookup:
-
-```sh
-# in ~/.zshrc
-teha-token() {
-  SOPS_AGE_KEY_FILE=$HOME/.config/teha/age.key \
-    sops -d "$HOME/.config/teha/todoist.enc.yaml" | sed -n 's/^todoist_token: //p'
-}
-# then: teha import --db ~/teha.db --token "$(teha-token)"
-```
-
-## On a new machine
-
-```sh
-mkdir -p ~/.config/teha && chmod 700 ~/.config/teha
-op document get "<your item title>" --vault "<your vault>" > ~/.config/teha/age.key
-chmod 600 ~/.config/teha/age.key
-age-keygen -y ~/.config/teha/age.key > ~/.config/teha/age.pub
-# copy .sops.yaml and todoist.enc.yaml across, or run the setup again
-```
-
-## Rules
-
-- Never commit `age.key`, `age.pub`, `todoist.enc.yaml` or any decrypted value.
-- Never pass a token as a command line argument in a script that others read,
-  and never echo one into a log.
-- Rotate the Todoist token in the Todoist settings when a machine is lost. Then
-  repeat the encryption step above.
-- The teha device token is a different secret. It is printed once at the first
-  server start, and it belongs in the password manager as well.
