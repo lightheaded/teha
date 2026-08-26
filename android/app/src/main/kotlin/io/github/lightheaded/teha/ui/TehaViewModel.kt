@@ -12,6 +12,7 @@ import io.github.lightheaded.teha.data.db.TaskEntity
 import io.github.lightheaded.teha.parser.Binding
 import io.github.lightheaded.teha.parser.ParsedLine
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -75,12 +76,28 @@ class TehaViewModel(app: Application) : AndroidViewModel(app) {
         _state.value = _state.value.copy(message = null)
     }
 
-    fun sync() {
+    /**
+     * sync pulls and pushes.
+     *
+     * announce is true when a PERSON asked, by pulling the list down. A sync on
+     * a local network finishes in tens of milliseconds, so the spinner appears
+     * and vanishes before an eye registers it, and the gesture reads as broken.
+     * An explicit pull therefore always ends in a sentence. A background sync
+     * stays silent, because nobody asked it a question.
+     */
+    fun sync(announce: Boolean = false) {
         if (_state.value.syncing) return
         _state.value = _state.value.copy(syncing = true)
         viewModelScope.launch {
             today.value = Binding.todayIso()
+            val startedAt = System.currentTimeMillis()
             val result = repo.sync()
+            // Hold the spinner long enough to be seen. Without this the pull
+            // animation snaps back instantly and looks like nothing happened.
+            if (announce) {
+                val elapsed = System.currentTimeMillis() - startedAt
+                if (elapsed < MIN_SPINNER_MS) delay(MIN_SPINNER_MS - elapsed)
+            }
             _state.value = when (result) {
                 is SyncResult.Ok ->
                     _state.value.copy(
@@ -95,7 +112,7 @@ class TehaViewModel(app: Application) : AndroidViewModel(app) {
                         // clearing it here erased the confirmation of the very
                         // task the user had just typed.
                         message = if (result.rejected.isEmpty()) {
-                            _state.value.message
+                            if (announce) "Synced. The account is at version ${result.version}." else _state.value.message
                         } else {
                             result.rejected.joinToString("\n") { "The server refused a change: $it" }
                         },
@@ -164,5 +181,11 @@ class TehaViewModel(app: Application) : AndroidViewModel(app) {
             repo.reset()
             sync()
         }
+    }
+
+    private companion object {
+        // Long enough that a person sees the spinner, short enough that it
+        // never feels like waiting. Only an explicit pull pays it.
+        const val MIN_SPINNER_MS = 450L
     }
 }

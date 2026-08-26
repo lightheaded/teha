@@ -120,16 +120,31 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
             }
             PullToRefreshBox(
                 isRefreshing = state.syncing,
-                onRefresh = vm::sync,
+                // announce = true: a person asked, so the result gets a
+                // sentence and the spinner stays visible long enough to see.
+                onRefresh = { vm.sync(announce = true) },
                 modifier = Modifier.fillMaxSize(),
             ) {
                 if (tasks.isEmpty()) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            if (state.configured) "Nothing due. Pull down to sync."
-                            else "Set the server address in settings.",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
+                    // A LazyColumn, not a Box, even for one line of text.
+                    // PullToRefreshBox reads the pull through nested scroll, and
+                    // only a scrollable child sends those events. With a plain
+                    // Box the gesture did nothing at all: no spinner, no sync,
+                    // no feedback. The empty screen is exactly where a person
+                    // first tries to pull, so it was the worst place to lose it.
+                    LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        item {
+                            Box(
+                                modifier = Modifier.fillParentMaxSize(),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    if (state.configured) "Nothing due. Pull down to sync."
+                                    else "Set the server address in settings.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                            }
+                        }
                     }
                 } else {
                     LazyColumn(modifier = Modifier.fillMaxSize()) {
