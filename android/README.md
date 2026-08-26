@@ -56,6 +56,44 @@ The bar acts on the list on screen, so it never touches a task the list hides. A
 task keeps its time of day, and a repeating task keeps its rule. The snackbar
 then offers **Undo**, which puts every task back on the day it had.
 
+## Change a task
+
+Touch a row anywhere except the checkbox. A sheet opens that edits every field
+the task has:
+
+| Field | How it works |
+|---|---|
+| Title, Notes | Free text. It saves half a second after the typing stops. |
+| Due | A menu of five presets, and a calendar under **Pick a day…**. |
+| Time | Only shown when the task has a day. **No time** takes it off. |
+| Priority | p1 to p4. p4 is the default and shows no mark. |
+| Project | One entry per project. The inbox reads as Inbox. |
+| Labels | Every label the account has, as chips, plus a field for a new one. |
+| Repeat | Four presets and a raw RRULE field. The shared Go engine judges the rule. |
+| Starts, Deadline | The same day menu as Due. |
+| Sub-tasks | A checkbox each, and a field to add one. A finished child stays, struck through. |
+
+The sheet reads the row from the database, so a sync that lands while it is open
+redraws it. Every change goes to the local row and the outbox at once. One sync
+goes out when the sheet closes, so every change made while it was open travels
+in one request.
+
+**Delete** hides the task and the snackbar offers **Undo**.
+
+## Act on many tasks at once
+
+Long press a row. The row is picked, and the top bar says how many are picked.
+A tap then adds another row to the set instead of opening it. Back, or the X in
+the top bar, drops the set.
+
+The bar at the bottom replaces the quick add field while a set is picked. It
+holds Schedule, Priority, Move, Complete and Delete. Each action drops the set
+and the snackbar offers **Undo**.
+
+While a set is picked the checkbox shows membership, not completion. Two
+meanings for one control in one moment is how a person completes a task they
+meant to select.
+
 ## Build
 
 You need these tools:
@@ -135,10 +173,10 @@ keystroke and shows a chip for each field that the parser found.
   does not read `GET /v1/events`, and it has no background sync and no
   notifications.
 - The task list shows two views: Today and All open. There is no project view
-  and no filter field yet, although the binding exposes `CompileFilter`.
-- A task row supports one action: complete or reopen. There is no edit screen,
-  no delete and no subtask view. The one bulk action is **Reschedule** on the
-  overdue bar, which moves every overdue task in the view.
+  and no filter field yet, although the binding exposes `CompileFilter`. This is
+  now the largest gap against the browser.
+- A comment, an attachment and a notification do not exist on the phone,
+  because they do not exist on the server either.
 - Cleartext HTTP is permitted, because a self-hosted server often runs on a
   private address with no certificate. Use HTTPS on any server that leaves your
   own network.

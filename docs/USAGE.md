@@ -176,7 +176,8 @@ A wrong token returns to the form with the message `That token did not match.`
 | The circle | Click it to complete the task. |
 | The rest of the row | Click it to open the detail sheet. |
 | Overdue section head | A **Reschedule** button. It moves every overdue task in the view. |
-| Toast | An **Undo** button for six seconds after a completion, a deletion or a reschedule. |
+| Selection bar | Appears at the bottom when tasks are picked. It says how many, and holds Schedule, Priority, Move, Complete and Delete. |
+| Toast | An **Undo** button for six seconds after a completion, a deletion, a reschedule or a bulk action. |
 | The round + button | On a narrow screen, it moves the cursor into the quick add box. |
 
 The built-in views are filter queries:
@@ -217,6 +218,38 @@ time and no day is one that no view can print.
 The toast holds an **Undo** button for six seconds. Undo puts every task back on
 the day it had, and the time with it.
 
+### Act on many tasks at once
+
+To pick a set of tasks:
+
+1. Hold the platform modifier, Command on a Mac or Control elsewhere, and click
+   a task. The row is then picked.
+2. Hold Shift and click another task. Every row between the two is picked.
+
+The keyboard does the same. `s` picks the task under the cursor. `Shift+A` picks
+every task in the view. Escape drops the whole set.
+
+A bar appears at the bottom. It says how many tasks are picked, and it holds
+five actions:
+
+| Action | What it does |
+|---|---|
+| Schedule | The same day menu as the overdue button, and a date field. |
+| Priority | p1 to p4. |
+| Move | One project per entry. The inbox reads as Inbox. |
+| Complete | Closes every picked task. A repeating task moves to its next date. |
+| Delete | Removes every picked task. |
+
+While a set is picked, every action key acts on the set instead of on the task
+under the cursor. So `1` sets p1 on the whole set, and `t` moves the whole set
+to today.
+
+Each action drops the selection and offers one **Undo** for six seconds. Undo
+puts every task back, one task at a time.
+
+The set never includes a task the view hides. A mark survives a change of view,
+and an action on a row the user cannot see is a change nobody can check.
+
 ### The detail sheet
 
 The sheet holds every field of one task: title, notes, due date, time, start
@@ -241,13 +274,17 @@ it loses focus. The sheet never waits for the server.
 | `m` | Due tomorrow. |
 | `w` | Due in seven days. |
 | `Shift+T` | Move every overdue task in the view to today. |
+| `s` | Pick the selected task for a bulk action. |
+| `Shift+A` | Pick every task in the view. |
+| Command or Control, and click | Pick one task. |
+| Shift and click | Pick a run of tasks. |
 | `e` or `o` | Open the detail sheet. |
 | Backspace, Delete or `#` | Delete the selected task. |
 | `u` | Undo the last completion or deletion. |
 | `r` | Sync now. |
 | `g` | Go to Today. |
 | `?` | Show the key list. |
-| Escape | Close the sheet, or leave the quick add box. |
+| Escape | Drop the selection, close the sheet, or leave the quick add box. |
 
 ### Offline
 
@@ -265,6 +302,7 @@ The service worker caches `/`, `/app.js`, `/parse.js`,
 | Complete, delete, undo | Works |
 | Priority keys, the `t`, `m` and `w` keys | Works |
 | Reschedule the whole overdue section, and undo it | Works |
+| Every bulk action on a picked set, and undo it | Works |
 | Every field in the detail sheet | Works |
 | The six built-in views, and a project view | Works |
 | The first load in a new browser | Needs the server one time |
@@ -906,8 +944,8 @@ This build is a proof of concept. The list below comes from
 the desktop. The Android app ships through Obtainium, and
 [android/README.md](../android/README.md) holds the install steps and the list
 of open defects. The phone app shows Today and All open, captures with the Quick
-Settings tile, and moves the whole overdue pile in one touch. It has no project
-view, no detail screen and no notifications yet.
+Settings tile, edits every field of a task, and acts on a picked set of tasks.
+It has no project view, no filter field and no notifications yet.
 
 **One person only.** You cannot share a project. There is no second account,
 no assignee, no push notification, no comment and no attachment.
@@ -934,9 +972,9 @@ Nothing else uses them.
 **The browser filter is a subset of the server filter.** Read
 [section 2](#the-browser-filter-is-a-subset).
 
-Next, in order: daily drive the account for a week and fix what the week finds,
-rehearse a restore from the Litestream replica, then give the phone a task
-detail screen.
+Next, in order: give the phone the project and filter views it still lacks,
+rehearse a restore from the Litestream replica, then add passkeys and a second
+account.
 
 The real Todoist import already ran, on 2026-08-25: 17 projects, 250 tasks, 63
 labels, 0 failed commands, one HTTP request, 34 milliseconds. It also found

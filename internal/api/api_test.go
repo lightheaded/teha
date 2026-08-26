@@ -314,10 +314,14 @@ func TestSyncNeverReturnsNullLists(t *testing.T) {
 type syncBody struct {
 	Applied []store.Result `json:"applied"`
 	Tasks   []struct {
-		ID      string `json:"id"`
-		DueDate string `json:"due_date"`
-		DueTime string `json:"due_time"`
-		RRule   string `json:"rrule"`
+		ID        string `json:"id"`
+		DueDate   string `json:"due_date"`
+		DueTime   string `json:"due_time"`
+		RRule     string `json:"rrule"`
+		ProjectID string `json:"project_id"`
+		Priority  int    `json:"priority"`
+		State     string `json:"state"`
+		DeletedAt string `json:"deleted_at"`
 	} `json:"tasks"`
 }
 
@@ -406,6 +410,113 @@ func TestBulkRescheduleInOneRequest(t *testing.T) {
 		}
 		if task.DueDate != "" || task.DueTime != "" {
 			t.Fatalf("task t2 kept a due field: date %q time %q", task.DueDate, task.DueTime)
+		}
+	}
+}
+
+// TestMixedBulkActionsInOneRequest locks the wire shape for every bulk action
+// the clients offer, not only the reschedule.
+//
+// D-008 says a bulk action is one command per task. This test sends four
+// different kinds of bulk action in one request, because that is what a person
+// who marks a set of tasks and works through it produces: a move, a priority,
+// a completion and a delete, each naming its own task.
+//
+// One request, one transaction. A batch that half applied would leave the
+// screen and the account disagreeing, with no way for the client to tell.
+func TestMixedBulkActionsInOneRequest(t *testing.T) {
+	_, ts := newServer(t, "tok")
+
+	seed := `{"since":0,"commands":[
+		{"uuid":"p1","type":"project_add","args":{"id":"pr1","name":"Shopping"}},
+		{"uuid":"a1","type":"task_add","args":{"id":"t1","title":"One"}},
+		{"uuid":"a2","type":"task_add","args":{"id":"t2","title":"Two"}},
+		{"uuid":"a3","type":"task_add","args":{"id":"t3","title":"Three"}},
+		{"uuid":"a4","type":"task_add","args":{"id":"t4","title":"Four"}}]}`
+	if code, body := do(t, ts, "POST", "/v1/sync", "tok", seed); code != http.StatusOK {
+		t.Fatalf("seed failed: %d %s", code, body)
+	}
+
+	bulk := `{"since":0,"commands":[
+		{"uuid":"b1","type":"task_update","args":{"id":"t1","project_id":"pr1"}},
+		{"uuid":"b2","type":"task_update","args":{"id":"t2","project_id":"pr1"}},
+		{"uuid":"b3","type":"task_update","args":{"id":"t3","priority":1}},
+		{"uuid":"b4","type":"task_complete","args":{"id":"t4"}},
+		{"uuid":"b5","type":"task_delete","args":{"id":"t3"}}]}`
+	code, body := do(t, ts, "POST", "/v1/sync", "tok", bulk)
+	if code != http.StatusOK {
+		t.Fatalf("bulk failed: %d %s", code, body)
+	}
+	got := decodeSync(t, body)
+	if len(got.Applied) != 5 {
+		t.Fatalf("applied %d commands, want 5: %s", len(got.Applied), body)
+	}
+	for _, r := range got.Applied {
+		if !r.OK {
+			t.Fatalf("command %s failed: %s", r.UUID, r.Error)
+		}
+	}
+
+	byID := map[string]struct {
+		project  string
+		priority int
+		state    string
+		deleted  bool
+	}{}
+	for _, task := range got.Tasks {
+		byID[task.ID] = struct {
+			project  string
+			priority int
+			state    string
+			deleted  bool
+		}{task.ProjectID, task.Priority, task.State, task.DeletedAt != ""}
+	}
+
+	if byID["t1"].project != "pr1" || byID["t2"].project != "pr1" {
+		t.Errorf("the move did not apply: t1 in %q, t2 in %q", byID["t1"].project, byID["t2"].project)
+	}
+	if byID["t3"].priority != 1 {
+		t.Errorf("t3 has priority %d, want 1", byID["t3"].priority)
+	}
+	// A delete after an update on the same task in the same batch. The order in
+	// the request is the order the server applies, so the priority above is
+	// kept and the row is also hidden.
+	if !byID["t3"].deleted {
+		t.Error("t3 is not deleted")
+	}
+	if byID["t4"].state != "done" {
+		t.Errorf("t4 is %q, want done", byID["t4"].state)
+	}
+	// A task nobody named must not change. A bulk action names every task it
+	// touches, so a row outside the set is proof that nothing leaked.
+	if byID["t1"].state != "open" || byID["t1"].priority != 4 {
+		t.Errorf("t1 changed beyond its move: state %q priority %d",
+			byID["t1"].state, byID["t1"].priority)
+	}
+
+	// The undo path: a restore brings the row back, and one command per task
+	// again.
+	undo := `{"since":0,"commands":[
+		{"uuid":"c1","type":"task_restore","args":{"id":"t3"}},
+		{"uuid":"c2","type":"task_uncomplete","args":{"id":"t4"}}]}`
+	code, body = do(t, ts, "POST", "/v1/sync", "tok", undo)
+	if code != http.StatusOK {
+		t.Fatalf("undo failed: %d %s", code, body)
+	}
+	after := decodeSync(t, body)
+	for _, task := range after.Tasks {
+		switch task.ID {
+		case "t3":
+			if task.DeletedAt != "" {
+				t.Errorf("t3 is still deleted: %q", task.DeletedAt)
+			}
+			if task.Priority != 1 {
+				t.Errorf("t3 lost its priority through the delete: %d", task.Priority)
+			}
+		case "t4":
+			if task.State != "open" {
+				t.Errorf("t4 is %q, want open", task.State)
+			}
 		}
 	}
 }

@@ -2,21 +2,31 @@
 
 package io.github.lightheaded.teha.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenu
@@ -51,12 +61,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.lightheaded.teha.data.db.ProjectEntity
 import io.github.lightheaded.teha.data.db.TaskEntity
 import io.github.lightheaded.teha.ui.theme.priorityColor
-import java.time.DayOfWeek
 import java.time.LocalDate
-import java.time.format.DateTimeFormatter
-import java.time.format.TextStyle
-import java.time.temporal.TemporalAdjusters
-import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -66,12 +71,22 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
     val projects by vm.projects.collectAsStateWithLifecycle()
     val today by vm.todayIso.collectAsStateWithLifecycle()
     val overdue by vm.overdue.collectAsStateWithLifecycle()
+    val detail by vm.detail.collectAsStateWithLifecycle()
+    val subtasks by vm.detailSubtasks.collectAsStateWithLifecycle()
+    val labels by vm.labels.collectAsStateWithLifecycle()
+    val marked by vm.marked.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    val selecting = marked.isNotEmpty()
+
+    // Back leaves the selection before it leaves the screen. A phone user
+    // reaches for back to escape a mode, and losing the whole screen instead
+    // is the wrong answer.
+    BackHandler(enabled = selecting) { vm.clearMarks() }
 
     LaunchedEffect(state.message) {
         val message = state.message ?: return@LaunchedEffect
         val answer = snackbar.showSnackbar(message, actionLabel = state.undoLabel)
-        if (answer == SnackbarResult.ActionPerformed) vm.undoReschedule()
+        if (answer == SnackbarResult.ActionPerformed) vm.undo()
         vm.dismissMessage()
     }
 
@@ -81,9 +96,15 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
             TopAppBar(
                 title = {
                     Column {
-                        Text(if (state.view == TaskView.TODAY) "Today" else "All open")
+                        Text(
+                            when {
+                                selecting -> if (marked.size == 1) "1 selected" else "${marked.size} selected"
+                                state.view == TaskView.TODAY -> "Today"
+                                else -> "All open"
+                            }
+                        )
                         val queued = state.queued
-                        if (queued > 0) {
+                        if (queued > 0 && !selecting) {
                             Text(
                                 "$queued waiting to send",
                                 style = MaterialTheme.typography.labelSmall,
@@ -91,9 +112,18 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
                         }
                     }
                 },
+                navigationIcon = {
+                    if (selecting) {
+                        IconButton(onClick = { vm.clearMarks() }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Drop the selection")
+                        }
+                    }
+                },
                 actions = {
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Filled.Settings, contentDescription = "Settings")
+                    if (!selecting) {
+                        IconButton(onClick = onOpenSettings) {
+                            Icon(Icons.Filled.Settings, contentDescription = "Settings")
+                        }
                     }
                 },
             )
@@ -106,7 +136,22 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
             // the keyboard opens straight over the field and the user types
             // blind. QuickAddActivity already does the same.
             Surface(tonalElevation = 3.dp, modifier = Modifier.imePadding()) {
-                QuickAddBar(parse = vm::parse, onSubmit = { vm.add(it) {} })
+                if (selecting) {
+                    // The actions take the place of the quick add field. A
+                    // phone has room for one bar, and capture is not what the
+                    // user is doing while a set is picked.
+                    SelectionBar(
+                        today = today,
+                        projects = projects,
+                        onReschedule = vm::bulkReschedule,
+                        onPriority = vm::bulkPriority,
+                        onProject = vm::bulkProject,
+                        onComplete = vm::bulkComplete,
+                        onDelete = vm::bulkDelete,
+                    )
+                } else {
+                    QuickAddBar(parse = vm::parse, onSubmit = { vm.add(it) {} })
+                }
             }
         },
     ) { padding ->
@@ -128,7 +173,7 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
                     label = { Text("All open") },
                 )
             }
-            if (overdue.isNotEmpty()) {
+            if (overdue.isNotEmpty() && !selecting) {
                 OverdueBar(
                     count = overdue.size,
                     today = today,
@@ -170,7 +215,13 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
                                 task = task,
                                 project = projects.firstOrNull { it.id == task.projectId },
                                 today = today,
+                                selected = task.id in marked,
+                                selecting = selecting,
                                 onToggle = { vm.toggle(task) },
+                                onOpen = {
+                                    if (selecting) vm.toggleMark(task) else vm.openDetail(task)
+                                },
+                                onLongPress = { vm.toggleMark(task) },
                             )
                             HorizontalDivider()
                         }
@@ -178,6 +229,24 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
                 }
             }
         }
+    }
+
+    // The sheet lives outside the Scaffold content, so it draws over the quick
+    // add bar and the snackbar rather than inside the list.
+    val openTask = detail
+    if (openTask != null) {
+        TaskDetailSheet(
+            task = openTask,
+            subtasks = subtasks,
+            projects = projects,
+            knownLabels = labels.map { it.name },
+            today = today,
+            onEdit = vm::edit,
+            onToggleTask = vm::toggle,
+            onAddSubtask = vm::addSubtask,
+            onDelete = vm::deleteOpenTask,
+            onClose = vm::onLeave,
+        )
     }
 }
 
@@ -194,19 +263,9 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
 @Composable
 private fun OverdueBar(count: Int, today: String, onPick: (String?) -> Unit) {
     var open by remember { mutableStateOf(false) }
-    val day = runCatching { LocalDate.parse(today) }.getOrNull() ?: LocalDate.now()
-    // The same five choices as the web client, and each one shows the day it
-    // means. A label with no date behind it makes the user guess.
-    val choices: List<Pair<String, LocalDate?>> = listOf(
-        "Today" to day,
-        "Tomorrow" to day.plusDays(1),
-        "This weekend" to day.with(TemporalAdjusters.nextOrSame(DayOfWeek.SATURDAY)),
-        // next, not nextOrSame: on a Monday "next week" means the Monday after
-        // this one, and a choice that resolves to today is already above.
-        "Next week" to day.with(TemporalAdjusters.next(DayOfWeek.MONDAY)),
-        "No date" to null,
-    )
-    val dayFormat = remember { DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault()) }
+    // The same five choices as the web client and as the detail screen. They
+    // live in Days.kt, so no screen can drift from the others.
+    val choices = dayChoices(parseDay(today) ?: LocalDate.now())
 
     Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
         Row(
@@ -250,24 +309,148 @@ private fun OverdueBar(count: Int, today: String, onPick: (String?) -> Unit) {
     }
 }
 
+/**
+ * SelectionBar acts on every task the user has picked.
+ *
+ * The same five actions the browser offers: schedule, priority, move,
+ * complete, delete. D-008 holds on both clients, so each one sends one command
+ * per task and each one has an undo.
+ *
+ * The row scrolls sideways rather than dropping an action behind an overflow
+ * menu. A narrow phone then shows four of the five, and a nudge reveals the
+ * last, which is one gesture instead of two.
+ */
+@Composable
+private fun SelectionBar(
+    today: String,
+    projects: List<ProjectEntity>,
+    onReschedule: (String?) -> Unit,
+    onPriority: (Int) -> Unit,
+    onProject: (String, String) -> Unit,
+    onComplete: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var days by remember { mutableStateOf(false) }
+    var prios by remember { mutableStateOf(false) }
+    var where by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 4.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box {
+            TextButton(onClick = { days = true }) { Text("Schedule") }
+            DropdownMenu(expanded = days, onDismissRequest = { days = false }) {
+                dayChoices(parseDay(today) ?: LocalDate.now()).forEach { (label, target) ->
+                    DropdownMenuItem(
+                        text = { Text(label) },
+                        trailingIcon = if (target != null) {
+                            {
+                                Text(
+                                    target.format(dayFormat),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        } else {
+                            null
+                        },
+                        onClick = { days = false; onReschedule(target?.toString()) },
+                    )
+                }
+            }
+        }
+        Box {
+            TextButton(onClick = { prios = true }) { Text("Priority") }
+            DropdownMenu(expanded = prios, onDismissRequest = { prios = false }) {
+                listOf(1 to "urgent", 2 to "high", 3 to "medium", 4 to "none").forEach { (n, word) ->
+                    DropdownMenuItem(
+                        text = { Text("p$n", color = priorityColor(n)) },
+                        trailingIcon = {
+                            Text(
+                                word,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        },
+                        onClick = { prios = false; onPriority(n) },
+                    )
+                }
+            }
+        }
+        Box {
+            TextButton(onClick = { where = true }) { Text("Move") }
+            DropdownMenu(expanded = where, onDismissRequest = { where = false }) {
+                projects.forEach { p ->
+                    val name = if (p.isInbox) "Inbox" else p.name
+                    DropdownMenuItem(
+                        text = { Text(name) },
+                        onClick = {
+                            where = false
+                            onProject(p.id, if (p.isInbox) "the inbox" else "#${p.name}")
+                        },
+                    )
+                }
+            }
+        }
+        TextButton(onClick = onComplete) { Text("Complete") }
+        TextButton(
+            onClick = onDelete,
+            colors = ButtonDefaults.textButtonColors(
+                contentColor = MaterialTheme.colorScheme.error,
+            ),
+        ) {
+            Icon(Icons.Filled.Delete, contentDescription = null)
+            Spacer(Modifier.width(4.dp))
+            Text("Delete")
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TaskRow(
     task: TaskEntity,
     project: ProjectEntity?,
     today: String,
+    selected: Boolean,
+    selecting: Boolean,
     onToggle: () -> Unit,
+    onOpen: () -> Unit,
+    onLongPress: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            // The whole row opens the task, and the checkbox alone completes
+            // it. The checkbox sits inside this clickable area, so it declares
+            // its own handler and swallows the touch first.
+            //
+            // A long press starts a selection, which is the gesture every
+            // phone gallery and mail app uses for the same job.
+            .combinedClickable(onClick = onOpen, onLongClick = onLongPress)
+            .background(
+                if (selected) MaterialTheme.colorScheme.secondaryContainer
+                else MaterialTheme.colorScheme.surface
+            )
             .padding(start = 4.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // While a set is being picked the box shows membership, not
+        // completion. Two meanings for one control in one moment is how a
+        // person completes a task they meant to select.
         Checkbox(
-            checked = task.state != "open",
-            onCheckedChange = { onToggle() },
+            checked = if (selecting) selected else task.state != "open",
+            onCheckedChange = { if (selecting) onLongPress() else onToggle() },
             colors = CheckboxDefaults.colors(
-                checkedColor = priorityColor(task.priority),
+                checkedColor = if (selecting) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    priorityColor(task.priority)
+                },
                 uncheckedColor = priorityColor(task.priority),
             ),
         )
@@ -308,21 +491,3 @@ private fun PriorityDot(priority: Int) {
     )
 }
 
-private fun isOverdue(due: String?, today: String): Boolean =
-    due != null && due < today
-
-/** dueLabel prints a day the way a phone user reads it, not as an ISO string. */
-private fun dueLabel(due: String, time: String?, today: String): String {
-    val day = runCatching { LocalDate.parse(due) }.getOrNull() ?: return due
-    val now = runCatching { LocalDate.parse(today) }.getOrNull() ?: return due
-    val name = when {
-        day == now -> "today"
-        day == now.plusDays(1) -> "tomorrow"
-        day == now.minusDays(1) -> "yesterday"
-        day.isBefore(now) && day.isAfter(now.minusDays(7)) ->
-            day.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault())
-        day.year == now.year -> day.format(DateTimeFormatter.ofPattern("d MMM"))
-        else -> due
-    }
-    return if (time.isNullOrEmpty()) name else "$name $time"
-}

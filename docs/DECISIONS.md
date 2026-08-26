@@ -289,9 +289,11 @@ Three more results follow from the same rule:
 The cost is a bigger request body. It is small: 35 overdue tasks are about 3 kB
 of JSON in one round trip, and the request limit is far above that.
 
-**Consequence.** Every bulk action follows this shape. The next ones are bulk
-complete, bulk label and bulk move to a project. None of them needs a new
-command type, only a client that can select more than one row.
+**Consequence.** Every bulk action follows this shape. Five of them now ship in
+both clients: schedule, priority, move to a project, complete and delete. None
+of them needed a new command type, only a client that can pick more than one
+row. `TestMixedBulkActionsInOneRequest` locks it: four kinds of bulk action in
+one request, one transaction, and a row nobody named does not move.
 
 **Reverses if:** a batch ever grows past what one request can hold. The answer
 then is paging over ids, not a query inside a command.

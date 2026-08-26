@@ -7,7 +7,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.lightheaded.teha.TehaApp
 import io.github.lightheaded.teha.data.DueChange
+import io.github.lightheaded.teha.data.Edit
 import io.github.lightheaded.teha.data.SyncResult
+import io.github.lightheaded.teha.data.db.LabelEntity
 import io.github.lightheaded.teha.data.db.ProjectEntity
 import io.github.lightheaded.teha.data.db.TaskEntity
 import io.github.lightheaded.teha.parser.Binding
@@ -21,12 +23,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 
 enum class TaskView { TODAY, ALL }
 
@@ -75,11 +75,81 @@ class TehaViewModel(app: Application) : AndroidViewModel(app) {
     val projects: StateFlow<List<ProjectEntity>> = repo.projects
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    val labels: StateFlow<List<LabelEntity>> = repo.labels
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     init {
         viewModelScope.launch {
             repo.outboxCount.collect { n -> _state.value = _state.value.copy(queued = n) }
         }
         if (repo.settings.isConfigured) sync()
+    }
+
+    // --- the detail screen ---------------------------------------------------
+    //
+    // The screen holds an id, not a task. The row it came from is a snapshot,
+    // and a sync that lands while the screen is open would leave that snapshot
+    // behind. An id plus a database flow always shows what the database holds.
+
+    private val openTaskId = MutableStateFlow<String?>(null)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val detail: StateFlow<TaskEntity?> = openTaskId
+        .flatMapLatest { id -> if (id == null) flowOf(null) else repo.task(id) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val detailSubtasks: StateFlow<List<TaskEntity>> = openTaskId
+        .flatMapLatest { id -> if (id == null) flowOf(emptyList()) else repo.subtasks(id) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun openDetail(task: TaskEntity) {
+        openTaskId.value = task.id
+    }
+
+    fun closeDetail() {
+        openTaskId.value = null
+    }
+
+    /**
+     * edit changes one field of the open task.
+     *
+     * No sync call. The detail screen changes several fields in a row, and a
+     * sync per keystroke would send one request per character. onLeave() sends
+     * the batch when the screen closes, and any other sync carries it earlier.
+     */
+    fun edit(change: Edit) {
+        val id = openTaskId.value ?: return
+        viewModelScope.launch { repo.edit(id, change) }
+    }
+
+    /** onLeave pushes whatever the detail screen queued. */
+    fun onLeave() {
+        closeDetail()
+        sync()
+    }
+
+    fun addSubtask(title: String) {
+        val parent = detail.value ?: return
+        viewModelScope.launch { repo.addSubtask(parent, title) }
+    }
+
+    /** deleteOpenTask hides the task and offers one chance to take it back. */
+    fun deleteOpenTask() {
+        val task = detail.value ?: return
+        closeDetail()
+        viewModelScope.launch {
+            repo.delete(task.id)
+            pendingUndo = {
+                repo.restore(task.id)
+                "Put \"${task.title}\" back"
+            }
+            _state.value = _state.value.copy(
+                message = "Deleted \"${task.title}\"",
+                undoLabel = "Undo",
+            )
+            sync()
+        }
     }
 
     fun setView(v: TaskView) {
@@ -90,12 +160,147 @@ class TehaViewModel(app: Application) : AndroidViewModel(app) {
         _state.value = _state.value.copy(message = null, undoLabel = null)
     }
 
+    // --- a set of tasks ------------------------------------------------------
+    //
+    // A long press starts a selection and a tap then adds to it, which is what
+    // every phone gallery and mail app does. While a selection exists a tap
+    // never opens the detail screen, so nobody loses a set by mis-touching one
+    // row.
+
+    private val _marked = MutableStateFlow<Set<String>>(emptySet())
+    val marked: StateFlow<Set<String>> = _marked.asStateFlow()
+
+    fun toggleMark(task: TaskEntity) {
+        val now = _marked.value
+        _marked.value = if (task.id in now) now - task.id else now + task.id
+    }
+
+    fun clearMarks() {
+        _marked.value = emptySet()
+    }
+
+    /**
+     * markedTasks are the marked tasks that are on the screen.
+     *
+     * On the screen, not in the account. A mark survives a change of view, and
+     * acting on a row the user can no longer see is a change nobody can check.
+     */
+    private fun markedTasks(): List<TaskEntity> {
+        val ids = _marked.value
+        return tasks.value.filter { it.id in ids }
+    }
+
+    /** bulkPriority sets one priority on the whole set. */
+    fun bulkPriority(priority: Int) {
+        val set = markedTasks()
+        if (set.isEmpty()) return
+        val back = set.map { it.id to Edit.Priority(it.priority) as Edit }
+        run(
+            set = set,
+            said = "Set p$priority on",
+            work = { repo.editEach(set.map { it.id to Edit.Priority(priority) }) },
+            undo = { repo.editEach(back); "Put the priority back on ${countWord(back.size)}" },
+        )
+    }
+
+    /** bulkProject moves the whole set. */
+    fun bulkProject(projectId: String, name: String) {
+        val set = markedTasks()
+        if (set.isEmpty()) return
+        val back = set.map { it.id to Edit.Project(it.projectId) as Edit }
+        run(
+            set = set,
+            said = "Moved",
+            tail = " to $name",
+            work = { repo.editEach(set.map { it.id to Edit.Project(projectId) }) },
+            undo = { repo.editEach(back); "Moved ${countWord(back.size)} back" },
+        )
+    }
+
+    /** bulkReschedule moves the whole set onto one day, or takes the day away. */
+    fun bulkReschedule(date: String?) {
+        val set = markedTasks()
+        if (set.isEmpty()) return
+        val back = set.map { DueChange(it.id, it.dueDate, it.dueTime) }
+        run(
+            set = set,
+            said = if (date == null) "Took the date off" else "Moved",
+            tail = if (date == null) "" else " to ${whenWord(date, today.value)}",
+            work = {
+                repo.setDue(set.map { DueChange(it.id, date, if (date == null) null else it.dueTime) })
+            },
+            undo = { repo.setDue(back); "Put ${countWord(back.size)} back" },
+        )
+    }
+
+    fun bulkComplete() {
+        val set = markedTasks()
+        if (set.isEmpty()) return
+        val ids = set.map { it.id }
+        run(
+            set = set,
+            said = "Completed",
+            work = { repo.completeMany(ids) },
+            undo = { repo.uncompleteMany(ids); "Reopened ${countWord(ids.size)}" },
+        )
+    }
+
+    fun bulkDelete() {
+        val set = markedTasks()
+        if (set.isEmpty()) return
+        val ids = set.map { it.id }
+        run(
+            set = set,
+            said = "Deleted",
+            work = { repo.deleteMany(ids) },
+            undo = { repo.restoreMany(ids); "Put ${countWord(ids.size)} back" },
+        )
+    }
+
+    /**
+     * run applies one bulk action, records its undo and says what it did.
+     *
+     * The undo arrives as an argument rather than being assigned after the
+     * call. viewModelScope dispatches on the immediate main dispatcher, so the
+     * work below can finish before the caller's next line runs, and an undo
+     * assigned on that next line would arrive after the snackbar offered it.
+     *
+     * The marks drop here, for every action. A set that survived its own
+     * action was still marked for the next one, so a second action hit tasks
+     * the user believed they had already dealt with.
+     */
+    private fun run(
+        set: List<TaskEntity>,
+        said: String,
+        tail: String = "",
+        work: suspend () -> Unit,
+        undo: suspend () -> String,
+    ) {
+        clearMarks()
+        pendingUndo = undo
+        viewModelScope.launch {
+            work()
+            _state.value = _state.value.copy(
+                message = "$said ${countWord(set.size)}$tail",
+                undoLabel = "Undo",
+            )
+            sync()
+        }
+    }
+
+    private fun countWord(n: Int): String = if (n == 1) "1 task" else "$n tasks"
+
     // --- reschedule ---------------------------------------------------------
 
-    // pendingUndo holds the days that the last reschedule replaced. It lives
-    // outside UiState, because a state object that carries work to do is a
-    // state object that runs it twice on a recomposition.
-    private var pendingUndo: List<DueChange>? = null
+    // pendingUndo is the work that takes the last change back, and the
+    // sentence to show once it has. It lives outside UiState, because a state
+    // object that carries work to do is a state object that runs it twice on a
+    // recomposition.
+    //
+    // A lambda, not a list of changes: a reschedule and a delete both need an
+    // undo, and they undo different things. One field here keeps one Undo
+    // button on screen, which is what a person expects.
+    private var pendingUndo: (suspend () -> String)? = null
 
     /**
      * rescheduleOverdue moves every overdue task in the list to one day.
@@ -111,37 +316,27 @@ class TehaViewModel(app: Application) : AndroidViewModel(app) {
         val what = if (n == 1) "1 task" else "$n tasks"
         viewModelScope.launch {
             repo.setDue(late.map { DueChange(it.id, date, if (date == null) null else it.dueTime) })
-            pendingUndo = back
+            pendingUndo = {
+                repo.setDue(back)
+                if (back.size == 1) "Put 1 task back" else "Put ${back.size} tasks back"
+            }
             _state.value = _state.value.copy(
-                message = if (date == null) "Took the date off $what" else "Moved $what to ${whenWord(date)}",
+                message = if (date == null) "Took the date off $what" else "Moved $what to ${whenWord(date, today.value)}",
                 undoLabel = "Undo",
             )
             sync()
         }
     }
 
-    /** undoReschedule puts every task back on the day it had. */
-    fun undoReschedule() {
-        val back = pendingUndo ?: return
+    /** undo takes the last change back, whatever it was. */
+    fun undo() {
+        val work = pendingUndo ?: return
         pendingUndo = null
         viewModelScope.launch {
-            repo.setDue(back)
-            val n = back.size
-            _state.value = _state.value.copy(
-                message = if (n == 1) "Put 1 task back" else "Put $n tasks back",
-                undoLabel = null,
-            )
+            val line = work()
+            _state.value = _state.value.copy(message = line, undoLabel = null)
             sync()
         }
-    }
-
-    /** whenWord names the day inside a sentence. */
-    private fun whenWord(date: String): String {
-        if (date == today.value) return "today"
-        val day = runCatching { LocalDate.parse(date) }.getOrNull() ?: return date
-        val now = runCatching { LocalDate.parse(today.value) }.getOrNull() ?: return date
-        if (day == now.plusDays(1)) return "tomorrow"
-        return day.format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault()))
     }
 
     /**
