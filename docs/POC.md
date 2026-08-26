@@ -160,9 +160,9 @@ The Go parser and the web parser both run the corpus in
 public entry point.*
 
 - No macOS app and no widget. The Android app has a quick settings tile, and it
-  covers two views only: Today and All open.
-- On the phone a task row completes or reopens. There is no detail screen, so a
-  single task's date, notes or labels can only change in the browser.
+  covers two views only: Today and All open. The browser has six built-in views
+  plus one per project, so the phone cannot reach a project list at all. This is
+  the largest gap that remains between the two clients.
 - No sharing, no second account, no push, no comments, no attachments.
 - No passkeys. One device token guards everything, and the browser keeps it in
   a cookie.
@@ -196,19 +196,20 @@ public entry point.*
 
 ## Next, in order
 
-*Updated 2026-08-26. Steps 1 to 3 of the first list are done: the real import
-ran, the server runs at a public address with Litestream replicating, and the
-Android app ships through Obtainium with a signed release.*
+*Updated 2026-08-26. The earlier list is done: the real import ran, the server
+runs at a public address with Litestream replicating, and the Android app ships
+through Obtainium with a signed release. Since then the phone gained a task
+detail screen, and both clients gained multi-select with five bulk actions.*
 
-1. **A task detail screen on the phone.** Today a row completes or reopens, and
-   nothing else. Every other edit needs the browser, which is the largest daily
-   drive gap that remains.
+1. **Views on the phone.** The binding already exposes `CompileFilter`, so the
+   phone can run the same filter grammar as the server and the browser. It needs
+   a schema shim first: the compiled SQL names the server's columns, and Room
+   holds the same rows under different names.
 2. **Rehearse a restore** from the Litestream replica into an empty volume, and
    write down the steps that worked.
 3. **Passkeys, then the second account.** The partner cannot use the app at all
    until an account exists that is not the owner's device token. This is what
    unlocks the household milestone.
-4. **Multi-select with bulk actions,** in both clients. The overdue Reschedule
-   button is the first bulk action, and D-008 fixes the wire shape for the rest:
-   complete, label, and move to a project.
-5. **Reminders and notifications.** Web Push with VAPID, per D-003.
+4. **Reminders and notifications.** Web Push with VAPID, per D-003.
+5. **Sections and a board layout.** The importer folds a Todoist section name
+   into the description today, because there is no section table.

@@ -96,9 +96,25 @@ for (const scheme of ['light', 'dark']) {
   await ctx.close();
 }
 
-// 5. Phone width. The Android app is not released, so the installed web app is
-// what a phone runs today, and the README must show that it is not a squeezed
-// desktop.
+// 5. A set of tasks picked, with the bulk action bar.
+//
+// The keyboard, not a modifier click. Playwright can hold a modifier, but the
+// key path is what the README documents and it does not depend on which
+// platform the runner reports.
+{
+  const { ctx, page } = await open(DESKTOP, 'light');
+  await page.click('#nav a[data-title="Next 7 days"]');
+  await page.waitForSelector('#list .row');
+  // j moves the cursor, s picks the row under it. Three of each picks a run.
+  for (const key of ['j', 's', 'j', 's', 'j', 's']) await page.keyboard.press(key);
+  await page.waitForSelector('.bulk');
+  await shot(page, 'bulk');
+  await ctx.close();
+}
+
+// 6. Phone width. The Android app is now released, and the installed web app is
+// still what a desktop browser shows at that width, so the README must show
+// that it is not a squeezed desktop.
 {
   const { ctx, page } = await open(PHONE, 'light');
   await shot(page, 'phone');

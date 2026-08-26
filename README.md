@@ -23,7 +23,15 @@ server, in the browser and on the phone, against one shared corpus.
 | | |
 |---|---|
 | ![The task detail sheet](docs/screenshots/detail.png) | ![The app at phone width](docs/screenshots/phone.png) |
-| **Every field, one sheet.** Start date, deadline and duration are here, and none of them is behind a paid plan. | **Phone width.** The installed web app until the Android app ships. |
+| **Every field, one sheet.** Start date, deadline and duration are here, and none of them is behind a paid plan. | **Phone width.** The installed web app, beside the released Android app. |
+
+![A set of tasks picked, with the bulk action bar](docs/screenshots/bulk.png)
+
+**Pick a set of tasks and act on all of them.** Hold the platform modifier and
+click, or hold Shift for a run, or press `s` on each row. Schedule, priority,
+move, complete and delete then work on the whole set, with one Undo. Each action
+sends one command per task, so an outbox that replays it tomorrow does the same
+thing. The Android app has the same five actions behind a long press.
 
 These images are generated, never captured by hand. `scripts/screenshots.sh`
 builds the server, seeds it from a fixed date, and drives a browser inside a
