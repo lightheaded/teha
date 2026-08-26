@@ -18,6 +18,7 @@ const S = {
   undo: null,
   online: true,
   detail: null,
+  menu: null,
 };
 
 import { parseQuickAdd, newId, iso } from './parse.js';
@@ -192,6 +193,117 @@ function schedule(t, days) {
   render();
 }
 
+// --- days -------------------------------------------------------------------
+
+const plusDays = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return iso(d); };
+
+// nextDow returns the coming day of the week, and today when today is that
+// day. 0 is Sunday, so Saturday is 6 and Monday is 1.
+function nextDow(dow) {
+  const d = new Date();
+  d.setDate(d.getDate() + ((dow - d.getDay() + 7) % 7));
+  return iso(d);
+}
+
+// --- bulk reschedule --------------------------------------------------------
+
+// overdueRows returns the overdue tasks of the list on screen. The screen, not
+// the whole account: a button in a project view must not touch another project.
+function overdueRows() {
+  const today = todayISO();
+  return visible().filter((t) => t.due_date && t.due_date < today);
+}
+
+// rescheduleAll moves a whole list of tasks to one day.
+//
+// One task_update per task, not one command that says "everything overdue".
+// A command names an id and a date, so a replay next week does the same thing.
+// A command with a query in it would mean something different every time the
+// server ran it, and the outbox exists to be replayed.
+//
+// date is an ISO day, or null to take the date away.
+function rescheduleAll(tasks, date) {
+  if (!tasks.length) return;
+  const before = tasks.map((t) => ({ id: t.id, due: t.due_date || null, time: t.due_time || null }));
+  tasks.forEach((t) => setDue(t, date));
+  const n = tasks.length;
+  const what = n === 1 ? '1 task' : n + ' tasks';
+  toast(date ? `Moved ${what} to ${whenWord(date)}` : `Took the date off ${what}`, () => {
+    before.forEach((b) => {
+      const t = S.tasks.get(b.id);
+      if (t) setDue(t, b.due, b.time);
+    });
+    render();
+  });
+  render();
+}
+
+// whenWord names the day inside a sentence. "today" reads as English there,
+// and a lowercased locale date does not, so only the two words are lowered.
+function whenWord(date) {
+  const label = dueLabel(date);
+  return (label === 'Today' || label === 'Tomorrow') ? label.toLowerCase() : label;
+}
+
+// setDue writes one task's day. time is only for an undo, which has to put
+// back what "No date" took away.
+//
+// The time goes with the date. The server lets a row hold a time and no day,
+// and such a row is one no view can print, so "No date" clears both.
+function setDue(t, date, time) {
+  if (!date) {
+    delete t.due_date;
+    delete t.due_time;
+    queue('task_update', { id: t.id, clear: ['due_date', 'due_time'] });
+    return;
+  }
+  t.due_date = date;
+  const args = { id: t.id, due_date: date };
+  if (time) { t.due_time = time; args.due_time = time; }
+  queue('task_update', args);
+}
+
+function rescheduleMenu(anchor, tasks) {
+  closeMenu();
+  const opts = [
+    ['Today', plusDays(0)],
+    ['Tomorrow', plusDays(1)],
+    ['This weekend', nextDow(6)],
+    ['Next week', nextDow(1) === todayISO() ? plusDays(7) : nextDow(1)],
+    ['No date', null],
+  ];
+  const back = document.createElement('div');
+  back.className = 'menu-back';
+  const el = document.createElement('div');
+  el.className = 'menu';
+  el.innerHTML = opts.map(([label, d], i) => `<button data-i="${i}"><span>${esc(label)}</span>`
+    + `<span class="w">${d ? esc(new Date(d + 'T00:00').toLocaleDateString(undefined,
+        { weekday: 'short', day: 'numeric', month: 'short' })) : ''}</span></button>`).join('')
+    + `<label class="pick"><span>Pick a day</span><input type="date" value="${todayISO()}"></label>`;
+
+  const r = anchor.getBoundingClientRect();
+  el.style.top = Math.round(r.bottom + 6) + 'px';
+  el.style.left = Math.round(Math.max(8, Math.min(r.left, window.innerWidth - 248))) + 'px';
+
+  [...el.querySelectorAll('button')].forEach((b) => {
+    b.onclick = () => { closeMenu(); rescheduleAll(tasks, opts[Number(b.dataset.i)][1]); };
+  });
+  el.querySelector('input').onchange = (e) => {
+    if (e.target.value) { closeMenu(); rescheduleAll(tasks, e.target.value); }
+  };
+  back.onclick = closeMenu;
+  document.body.append(back, el);
+  S.menu = { back, el };
+  el.querySelector('button').focus();
+}
+
+function closeMenu() {
+  if (!S.menu) return;
+  S.menu.back.remove();
+  S.menu.el.remove();
+  S.menu = null;
+}
+
 function removeTask(t) {
   if (!t) return;
   const before = { ...t };
@@ -309,10 +421,12 @@ function render() {
     let lastGroup = null;
     list.innerHTML = rows.map((t, i) => {
       const g = groupOf(t);
-      const head = g === lastGroup ? '' : `<div class="grp-head">${esc(g)}</div>`;
+      const head = g === lastGroup ? '' : groupHead(g, rows);
       lastGroup = g;
       return head + rowHTML(t, i);
     }).join('');
+    const rb = list.querySelector('.resched');
+    if (rb) rb.onclick = (e) => { e.stopPropagation(); rescheduleMenu(rb, overdueRows()); };
     [...list.querySelectorAll('.row')].forEach((el, i) => {
       el.querySelector('.box').onclick = (e) => { e.stopPropagation(); complete(rows[i]); };
       // The circle completes the task. Anywhere else in the row opens the
@@ -353,6 +467,16 @@ function groupOf(t) {
   if (t.due_date === iso(d1)) return 'Tomorrow';
   return new Date(t.due_date + 'T00:00').toLocaleDateString(undefined,
     { weekday: 'long', day: 'numeric', month: 'long' });
+}
+
+// groupHead prints one section title. The overdue section also carries the
+// button that moves the whole section, because the morning after a busy week
+// the alternative is a dozen separate edits.
+function groupHead(g, rows) {
+  if (g !== 'Overdue') return `<div class="grp-head">${esc(g)}</div>`;
+  const n = rows.filter((t) => groupOf(t) === 'Overdue').length;
+  return `<div class="grp-head"><span>${esc(g)}</span><span class="c">${n}</span>`
+    + `<button class="resched">Reschedule</button></div>`;
 }
 
 function rowHTML(t, i) {
@@ -535,12 +659,24 @@ function wire() {
       if (e.key === 'Escape') { closeDetail(); e.target.blur(); }
       return;
     }
+    if (S.menu) {
+      if (e.key === 'Escape') closeMenu();
+      return;
+    }
     if (S.detail) {
       if (e.key === 'Escape') closeDetail();
       return;
     }
     const rows = visible();
     const cur = rows[S.sel];
+    // Shift+T moves the whole overdue section, and plain t moves one task, so
+    // the two must never be confused. A browser reports the upper case letter
+    // while shift is down, but a synthesised event can carry the lower case
+    // one, so the modifier is read as well as the letter.
+    if (e.key === 'T' || (e.key === 't' && e.shiftKey)) {
+      rescheduleAll(overdueRows(), todayISO());
+      return;
+    }
     switch (e.key) {
       case 'q': case 'a': e.preventDefault(); $('qa').focus(); break;
       case 'j': case 'ArrowDown': S.sel = Math.min(S.sel + 1, rows.length - 1); render(); break;
@@ -569,6 +705,7 @@ function showKeys() {
     <dt>x</dt><dd>complete the selected task</dd>
     <dt>1..4</dt><dd>set priority</dd>
     <dt>t / m / w</dt><dd>due today, tomorrow, next week</dd>
+    <dt>T</dt><dd>move every overdue task in this view to today</dd>
     <dt>e</dt><dd>open the task detail</dd>
     <dt>u</dt><dd>undo the last action</dd>
     <dt>r</dt><dd>sync now</dd>

@@ -6,6 +6,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.lightheaded.teha.TehaApp
+import io.github.lightheaded.teha.data.DueChange
 import io.github.lightheaded.teha.data.SyncResult
 import io.github.lightheaded.teha.data.db.ProjectEntity
 import io.github.lightheaded.teha.data.db.TaskEntity
@@ -23,6 +24,9 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 enum class TaskView { TODAY, ALL }
 
@@ -30,6 +34,9 @@ data class UiState(
     val view: TaskView = TaskView.TODAY,
     val syncing: Boolean = false,
     val message: String? = null,
+    // undoLabel is set when the message on screen can be taken back. The
+    // snackbar shows it as an action, and a null label means no action.
+    val undoLabel: String? = null,
     val queued: Int = 0,
     val configured: Boolean = false,
 )
@@ -58,6 +65,13 @@ class TehaViewModel(app: Application) : AndroidViewModel(app) {
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    // The overdue tasks of the list on screen. The screen, not the whole
+    // account: a button must never touch a task the user cannot see.
+    val overdue: StateFlow<List<TaskEntity>> =
+        combine(tasks, today) { list, day ->
+            list.filter { it.dueDate != null && it.dueDate < day }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     val projects: StateFlow<List<ProjectEntity>> = repo.projects
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -73,7 +87,61 @@ class TehaViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun dismissMessage() {
-        _state.value = _state.value.copy(message = null)
+        _state.value = _state.value.copy(message = null, undoLabel = null)
+    }
+
+    // --- reschedule ---------------------------------------------------------
+
+    // pendingUndo holds the days that the last reschedule replaced. It lives
+    // outside UiState, because a state object that carries work to do is a
+    // state object that runs it twice on a recomposition.
+    private var pendingUndo: List<DueChange>? = null
+
+    /**
+     * rescheduleOverdue moves every overdue task in the list to one day.
+     *
+     * This is the answer to the morning after a busy week, where a dozen tasks
+     * all say "yesterday". date is an ISO day, or null to take the day away.
+     */
+    fun rescheduleOverdue(date: String?) {
+        val late = overdue.value
+        if (late.isEmpty()) return
+        val back = late.map { DueChange(it.id, it.dueDate, it.dueTime) }
+        val n = late.size
+        val what = if (n == 1) "1 task" else "$n tasks"
+        viewModelScope.launch {
+            repo.setDue(late.map { DueChange(it.id, date, if (date == null) null else it.dueTime) })
+            pendingUndo = back
+            _state.value = _state.value.copy(
+                message = if (date == null) "Took the date off $what" else "Moved $what to ${whenWord(date)}",
+                undoLabel = "Undo",
+            )
+            sync()
+        }
+    }
+
+    /** undoReschedule puts every task back on the day it had. */
+    fun undoReschedule() {
+        val back = pendingUndo ?: return
+        pendingUndo = null
+        viewModelScope.launch {
+            repo.setDue(back)
+            val n = back.size
+            _state.value = _state.value.copy(
+                message = if (n == 1) "Put 1 task back" else "Put $n tasks back",
+                undoLabel = null,
+            )
+            sync()
+        }
+    }
+
+    /** whenWord names the day inside a sentence. */
+    private fun whenWord(date: String): String {
+        if (date == today.value) return "today"
+        val day = runCatching { LocalDate.parse(date) }.getOrNull() ?: return date
+        val now = runCatching { LocalDate.parse(today.value) }.getOrNull() ?: return date
+        if (day == now.plusDays(1)) return "tomorrow"
+        return day.format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault()))
     }
 
     /**

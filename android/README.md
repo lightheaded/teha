@@ -46,6 +46,16 @@ Notes on the mechanism:
 To add the tile, open the Quick Settings panel, edit the tiles, and drag
 **teha add** into the panel.
 
+## Move every overdue task
+
+When the list holds a late task, a bar appears above it and says how many are
+late. Touch **Reschedule** and pick a day: Today, Tomorrow, This weekend, Next
+week, No date, and each choice shows the day it means.
+
+The bar acts on the list on screen, so it never touches a task the list hides. A
+task keeps its time of day, and a repeating task keeps its rule. The snackbar
+then offers **Undo**, which puts every task back on the day it had.
+
 ## Build
 
 You need these tools:
@@ -127,7 +137,8 @@ keystroke and shows a chip for each field that the parser found.
 - The task list shows two views: Today and All open. There is no project view
   and no filter field yet, although the binding exposes `CompileFilter`.
 - A task row supports one action: complete or reopen. There is no edit screen,
-  no delete and no subtask view.
+  no delete and no subtask view. The one bulk action is **Reschedule** on the
+  overdue bar, which moves every overdue task in the view.
 - Cleartext HTTP is permitted, because a self-hosted server often runs on a
   private address with no certificate. Use HTTPS on any server that leaves your
   own network.
@@ -139,7 +150,7 @@ keystroke and shows a chip for each field that the parser found.
 ## Known defects
 
 A review on 2026-08-26 read every source against the Go server contract. It
-found nine defects. Six are fixed. These five are open, and none of them loses
+found nine defects. Seven are fixed. These four are open, and none of them loses
 data.
 
 | # | Defect | Effect |
@@ -148,22 +159,24 @@ data.
 | 2 | The encrypted preference file and the database open on the main thread | Keystore work and file input happen before the first frame. StrictMode reports it, and a slow device can show an ANR. |
 | 3 | A label whose name holds a comma splits into two labels on the phone | Display only. The quick add parser cannot make such a name, but the MCP server and the importer can. |
 | 4 | A 401 shows the same message as a network failure | Nothing points the user at the settings screen to fix the token. |
-| 5 | The outbox orders by a millisecond stamp alone | Two commands stamped in the same millisecond can be sent in either order. Unproven, and the identifier is already sortable, so it is a ready tie-break. |
 
-Fix these before the first release. Read the fix commit for the six that were
-closed, because each one names the failure it prevents.
 
-## Before the first build
+Read the fix commit for each closed defect, because each one names the failure
+it prevents. Defect 5, the outbox order, was closed on 2026-08-26: the query now
+reads `ORDER BY createdAt ASC, uuid ASC`. A bulk reschedule writes every command
+inside one millisecond, so the stamp alone stopped being enough. The uuid comes
+from the shared `id` package, which counts within a millisecond, so it sorts in
+creation order and settles the tie at no cost.
 
-The Android workflow at `.github/workflows/android.yml` needs a push with the
-`workflow` scope. To unblock it, do these steps in order:
+## How the release pipeline was set up
 
-1. Refresh the token scope with `gh auth refresh -h github.com -s workflow`, or
-   restore SSH access.
-2. Run `git push origin android`. Two commits stay on the branch until the
-   scope is correct. They add `.github/workflows/android.yml` and
-   `.github/workflows/identity.yml`.
-3. Create the upload keystore. Keep it forever, and keep a backup off the
+These steps ran once, on 2026-08-26. They are here for the day a key or a
+runner has to be rebuilt, not as work to do.
+
+1. Push `.github/workflows/**` over SSH, or refresh the token scope with
+   `gh auth refresh -h github.com -s workflow`. An HTTPS push of a workflow file
+   fails without that scope.
+2. Create the upload keystore. Keep it forever, and keep a backup off the
    machine.
 
    ```sh
@@ -171,7 +184,7 @@ The Android workflow at `.github/workflows/android.yml` needs a push with the
      -keyalg RSA -keysize 4096 -validity 10000
    ```
 
-4. Add two repository secrets:
+3. Add two repository secrets:
 
    | Secret | Value |
    |---|---|
@@ -181,8 +194,8 @@ The Android workflow at `.github/workflows/android.yml` needs a push with the
    The workflow uses the store password as the key password. The alias is
    `teha`.
 
-5. Merge the branch into `main`. The release job then builds, signs and
-   publishes the first APK.
+4. Merge the branch into `main`. The release job then builds, signs and
+   publishes the APK.
 
 The release job fails when a secret is absent. That is deliberate. A silent
 skip produces a green run that ships nothing.

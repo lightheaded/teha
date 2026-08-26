@@ -309,3 +309,103 @@ func TestSyncNeverReturnsNullLists(t *testing.T) {
 		})
 	}
 }
+
+// syncBody is the part of a sync answer that the reschedule test reads.
+type syncBody struct {
+	Applied []store.Result `json:"applied"`
+	Tasks   []struct {
+		ID      string `json:"id"`
+		DueDate string `json:"due_date"`
+		DueTime string `json:"due_time"`
+		RRule   string `json:"rrule"`
+	} `json:"tasks"`
+}
+
+func decodeSync(t *testing.T, body string) syncBody {
+	t.Helper()
+	var out syncBody
+	if err := json.Unmarshal([]byte(body), &out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// TestBulkRescheduleInOneRequest locks the contract that both clients now
+// depend on for their "Reschedule" button.
+//
+// A bulk reschedule is one task_update per task in one request. It is not one
+// command that says "everything overdue": a command names an id and a date, so
+// a replay from an outbox does the same thing tomorrow, while a command that
+// carried a query would mean something different every time the server ran it.
+//
+// The test also proves the two rules the clients rely on:
+//   - a command that does not name due_time leaves the time alone
+//   - clearing a date can clear the time with it, so no row is left holding a
+//     time and no day, which is a row that no view can print
+func TestBulkRescheduleInOneRequest(t *testing.T) {
+	_, ts := newServer(t, "tok")
+
+	add := `{"since":0,"commands":[
+		{"uuid":"a1","type":"task_add","args":{"id":"t1","title":"One","due_date":"2026-08-20"}},
+		{"uuid":"a2","type":"task_add","args":{"id":"t2","title":"Two","due_date":"2026-08-21","due_time":"09:00"}},
+		{"uuid":"a3","type":"task_add","args":{"id":"t3","title":"Three","due_date":"2026-08-22","rrule":"FREQ=WEEKLY"}}]}`
+	if code, body := do(t, ts, "POST", "/v1/sync", "tok", add); code != http.StatusOK {
+		t.Fatalf("seed failed: %d %s", code, body)
+	}
+
+	move := `{"since":0,"commands":[
+		{"uuid":"b1","type":"task_update","args":{"id":"t1","due_date":"2026-08-25"}},
+		{"uuid":"b2","type":"task_update","args":{"id":"t2","due_date":"2026-08-25"}},
+		{"uuid":"b3","type":"task_update","args":{"id":"t3","due_date":"2026-08-25"}}]}`
+	code, body := do(t, ts, "POST", "/v1/sync", "tok", move)
+	if code != http.StatusOK {
+		t.Fatalf("reschedule failed: %d %s", code, body)
+	}
+	got := decodeSync(t, body)
+	if len(got.Applied) != 3 {
+		t.Fatalf("applied %d commands, want 3: %s", len(got.Applied), body)
+	}
+	for _, r := range got.Applied {
+		if !r.OK {
+			t.Fatalf("command %s failed: %s", r.UUID, r.Error)
+		}
+	}
+	for _, task := range got.Tasks {
+		if task.DueDate != "2026-08-25" {
+			t.Errorf("task %s is due %q, want 2026-08-25", task.ID, task.DueDate)
+		}
+	}
+	for _, task := range got.Tasks {
+		switch task.ID {
+		case "t2":
+			// The command never named the time, so the time stays.
+			if task.DueTime != "09:00" {
+				t.Errorf("task t2 lost its time: %q", task.DueTime)
+			}
+		case "t3":
+			// A repeating task keeps repeating. Only the next date moved.
+			if task.RRule != "FREQ=WEEKLY" {
+				t.Errorf("task t3 lost its rule: %q", task.RRule)
+			}
+		}
+	}
+
+	clear := `{"since":0,"commands":[
+		{"uuid":"c1","type":"task_update","args":{"id":"t2","clear":["due_date","due_time"]}}]}`
+	code, body = do(t, ts, "POST", "/v1/sync", "tok", clear)
+	if code != http.StatusOK {
+		t.Fatalf("clear failed: %d %s", code, body)
+	}
+	// A fresh value, not the one above. encoding/json reuses the elements of a
+	// slice it decodes into, and an absent field then keeps the old value, so a
+	// second decode into the same variable reads a stale date.
+	after := decodeSync(t, body)
+	for _, task := range after.Tasks {
+		if task.ID != "t2" {
+			continue
+		}
+		if task.DueDate != "" || task.DueTime != "" {
+			t.Fatalf("task t2 kept a due field: date %q time %q", task.DueDate, task.DueTime)
+		}
+	}
+}

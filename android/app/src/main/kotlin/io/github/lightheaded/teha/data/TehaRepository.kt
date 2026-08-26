@@ -39,6 +39,15 @@ data class AddResult(
     val notice: String = "",
 )
 
+/**
+ * DueChange is one task's new day.
+ *
+ * dueTime rides with dueDate on purpose. The server accepts a row that holds a
+ * time and no day, and no view can print such a row, so a change that takes
+ * the day away takes the time with it, and an undo puts both back.
+ */
+data class DueChange(val id: String, val dueDate: String?, val dueTime: String?)
+
 /** The result of one sync. */
 sealed interface SyncResult {
     data class Ok(val version: Long, val rejected: List<String>) : SyncResult
@@ -174,6 +183,39 @@ class TehaRepository(context: Context) {
         val task = db.tasks().byId(taskId) ?: return
         db.tasks().upsertOne(task.copy(state = state))
         queue(type, buildJsonObject { put("id", taskId) })
+    }
+
+    /**
+     * setDue writes a new day onto a list of tasks.
+     *
+     * One task_update per task, not one command that says "everything
+     * overdue". A command names an id and a date, so a replay from the outbox
+     * does the same thing tomorrow. A command that carried a query would mean
+     * something different every time the server ran it.
+     *
+     * The whole list goes into the outbox before any network call, so one sync
+     * carries every change in one request.
+     */
+    suspend fun setDue(changes: List<DueChange>) {
+        changes.forEach { c ->
+            val task = db.tasks().byId(c.id) ?: return@forEach
+            db.tasks().upsertOne(task.copy(dueDate = c.dueDate, dueTime = c.dueTime))
+            queue(
+                "task_update",
+                buildJsonObject {
+                    put("id", c.id)
+                    if (c.dueDate == null) {
+                        put("clear", buildJsonArray { add("due_date"); add("due_time") })
+                    } else {
+                        put("due_date", c.dueDate)
+                        // The server keeps a field that a command does not
+                        // name, so the time is sent as well. That keeps the
+                        // phone and the server reading the same row.
+                        if (c.dueTime != null) put("due_time", c.dueTime)
+                    }
+                },
+            )
+        }
     }
 
     private suspend fun queue(type: String, args: JsonObject) {

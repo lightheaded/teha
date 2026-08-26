@@ -261,3 +261,37 @@ one client has.
 **Reverses if:** authentication becomes per-client, so that an agent token can
 be scoped and revoked separately from a person's. Then the endpoint can be on by
 default, because a leaked agent token would no longer be a leaked account.
+
+## D-008 — A bulk action is many commands, never one command with a query
+
+**Date:** 2026-08-26 · **Status:** done
+
+"Reschedule every overdue task to today" is one gesture for the user. On the
+wire it is one `task_update` per task, all in one `POST /v1/sync` request. The
+server has no command that carries a query, such as "move everything overdue".
+
+**Why.** The outbox is a replay log. A client writes a command, the phone goes
+into a tunnel, and the command is sent minutes or days later. A command that
+names an id and a date does the same thing whenever it runs. A command that
+carried the words "everything overdue" would mean a different set of tasks
+every time the server ran it, and a retry after midnight would move tasks that
+the user never saw.
+
+Three more results follow from the same rule:
+
+- **Undo is free.** The client already knows each task's old day, so the undo is
+  the same shape as the action: one command per task, with the old value.
+- **A refusal is precise.** The server answers per command uuid, so the client
+  can report which one task failed instead of a whole batch.
+- **Idempotence still holds.** The server keys on the command uuid, so a resend
+  changes nothing.
+
+The cost is a bigger request body. It is small: 35 overdue tasks are about 3 kB
+of JSON in one round trip, and the request limit is far above that.
+
+**Consequence.** Every bulk action follows this shape. The next ones are bulk
+complete, bulk label and bulk move to a project. None of them needs a new
+command type, only a client that can select more than one row.
+
+**Reverses if:** a batch ever grows past what one request can hold. The answer
+then is paging over ids, not a query inside a command.

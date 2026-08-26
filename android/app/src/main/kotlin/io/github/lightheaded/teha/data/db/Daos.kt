@@ -81,7 +81,12 @@ interface OutboxDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun add(row: OutboxEntity)
 
-    @Query("SELECT * FROM outbox ORDER BY createdAt ASC LIMIT :limit")
+    // uuid breaks the tie. A bulk action writes every command inside one
+    // millisecond, so createdAt alone leaves the order of those rows to the
+    // database. The uuid comes from the shared id package, which counts within
+    // a millisecond, so it sorts in creation order and settles the tie for
+    // free.
+    @Query("SELECT * FROM outbox ORDER BY createdAt ASC, uuid ASC LIMIT :limit")
     suspend fun oldest(limit: Int): List<OutboxEntity>
 
     @Query("DELETE FROM outbox WHERE uuid IN (:uuids)")

@@ -175,7 +175,8 @@ A wrong token returns to the form with the message `That token did not match.`
 | Task list | Groups in this order: Overdue, Today, Tomorrow, then one group per date, then No date. |
 | The circle | Click it to complete the task. |
 | The rest of the row | Click it to open the detail sheet. |
-| Toast | An **Undo** button for six seconds after a completion or a deletion. |
+| Overdue section head | A **Reschedule** button. It moves every overdue task in the view. |
+| Toast | An **Undo** button for six seconds after a completion, a deletion or a reschedule. |
 | The round + button | On a narrow screen, it moves the cursor into the quick add box. |
 
 The built-in views are filter queries:
@@ -193,6 +194,28 @@ A project entry in the sidebar runs `#<project name>`.
 
 The list order is the due date, then the priority, then the title. A task with
 no date goes last.
+
+### Move every overdue task in one gesture
+
+The morning after a busy week a dozen tasks all say yesterday. To move them all:
+
+1. Open a view that shows overdue tasks, for example Today.
+2. Touch **Reschedule** on the Overdue section head.
+3. Pick a day.
+
+The choices are Today, Tomorrow, This weekend, Next week, No date, and a date
+field. Each choice shows the day it means, so nothing is guessed. `Shift+T` does
+the same as picking Today.
+
+The button acts on the view on screen and never on a task the view hides. So
+**Reschedule** inside a project view moves that project's overdue tasks alone.
+
+A task keeps its time of day. A repeating task keeps its rule and only its next
+date moves. **No date** takes the time away with the day, because a task with a
+time and no day is one that no view can print.
+
+The toast holds an **Undo** button for six seconds. Undo puts every task back on
+the day it had, and the time with it.
 
 ### The detail sheet
 
@@ -217,6 +240,7 @@ it loses focus. The sheet never waits for the server.
 | `t` | Due today. |
 | `m` | Due tomorrow. |
 | `w` | Due in seven days. |
+| `Shift+T` | Move every overdue task in the view to today. |
 | `e` or `o` | Open the detail sheet. |
 | Backspace, Delete or `#` | Delete the selected task. |
 | `u` | Undo the last completion or deletion. |
@@ -240,6 +264,7 @@ The service worker caches `/`, `/app.js`, `/parse.js`,
 | Add a task, with the full quick add syntax | Works |
 | Complete, delete, undo | Works |
 | Priority keys, the `t`, `m` and `w` keys | Works |
+| Reschedule the whole overdue section, and undo it | Works |
 | Every field in the detail sheet | Works |
 | The six built-in views, and a project view | Works |
 | The first load in a new browser | Needs the server one time |
@@ -877,11 +902,12 @@ Run `--dry-run` first, read the summary, then run the real import.
 This build is a proof of concept. The list below comes from
 [POC.md](POC.md).
 
-**No released native client.** There is no macOS app and no widget. The web app
-and the command line client cover every surface today. An Android app is under
-construction on the `android` branch, and the `mobile` package already holds
-the gomobile binding it links. Nothing is released yet, so treat the phone as a
-browser for now: add the web app to the home screen.
+**No macOS app and no widget.** The web app and the command line client cover
+the desktop. The Android app ships through Obtainium, and
+[android/README.md](../android/README.md) holds the install steps and the list
+of open defects. The phone app shows Today and All open, captures with the Quick
+Settings tile, and moves the whole overdue pile in one touch. It has no project
+view, no detail screen and no notifications yet.
 
 **One person only.** You cannot share a project. There is no second account,
 no assignee, no push notification, no comment and no attachment.
@@ -897,8 +923,9 @@ name into the description, because there is no section table.
 That is enough for thousands of tasks. It needs a replacement before it holds a
 decade of history.
 
-**The backup is untested.** Litestream is wired into the compose file. Nobody
-rehearsed a restore against real object storage yet.
+**The backup restore is untested.** Litestream replicates the cluster database
+to object storage and reports a matching transaction id. Nobody has rehearsed a
+restore from those files yet.
 
 **Start date, deadline and duration have columns but little UI.** The detail
 sheet edits the start date and the deadline. The filter language reads them.
@@ -907,8 +934,9 @@ Nothing else uses them.
 **The browser filter is a subset of the server filter.** Read
 [section 2](#the-browser-filter-is-a-subset).
 
-Next, in order: daily drive the imported account for a week, deploy behind the
-public entry point with a rehearsed restore, then finish the Android app.
+Next, in order: daily drive the account for a week and fix what the week finds,
+rehearse a restore from the Litestream replica, then give the phone a task
+detail screen.
 
 The real Todoist import already ran, on 2026-08-25: 17 projects, 250 tasks, 63
 labels, 0 failed commands, one HTTP request, 34 milliseconds. It also found
