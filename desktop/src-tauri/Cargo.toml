@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# Every version is exact. A desktop shell that a person builds by hand once a
+# month must build the same way in six months, and Tauri moves its plugins on
+# their own release trains.
+
+[package]
+name = "teha"
+version = "0.1.0"
+description = "The teha desktop shell: quick add, a menu bar icon and the teha:// scheme"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[build-dependencies]
+tauri-build = "=2.6.3"
+
+[dependencies]
+# tray-icon builds the menu bar item. image-png reads the menu bar mask that
+# tools/make-icons.py writes.
+tauri = { version = "=2.11.5", features = ["tray-icon", "image-png"] }
+tauri-plugin-deep-link = "=2.4.9"
+tauri-plugin-global-shortcut = "=2.3.2"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+url = "=2.5.8"
+
+# The single instance plugin is desktop only, and the deep-link feature is what
+# hands a teha:// URL from a second launch to the running app.
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = { version = "=2.4.3", features = ["deep-link"] }
+
+# The token lives in the platform credential store. The feature per target
+# names the native store, so no D-Bus or mock backend can be selected by
+# accident.
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "=3.6.3", features = ["apple-native"] }
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "=3.6.3", features = ["windows-native"] }
+
+# Linux is not a target of this milestone. The kernel keyring keeps the build
+# green on a Linux workstation without a D-Bus development package, and it
+# forgets the token at the next boot.
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "=3.6.3", features = ["linux-native"] }
+
+[profile.release]
+# A personal build, not a store build. Small matters more than a stack trace.
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
