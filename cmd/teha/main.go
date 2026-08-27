@@ -22,6 +22,7 @@ import (
 
 	"github.com/lightheaded/teha/internal/api"
 	"github.com/lightheaded/teha/internal/mcpsrv"
+	"github.com/lightheaded/teha/internal/push"
 	"github.com/lightheaded/teha/internal/store"
 	"github.com/lightheaded/teha/internal/webui"
 )
@@ -59,12 +60,24 @@ func main() {
 		seed    = flag.Bool("seed", false, "write example data into an empty database and exit")
 		seedDay = flag.String("seed-date", "", "the day that seeded dates count from, as 2006-01-02. Empty means today. Used by the screenshot job, so that an unchanged screen produces an identical image on any day")
 		version = flag.Bool("version", false, "print the version and exit")
+		// Web Push, per docs/DECISIONS.md D-003. The public key has a flag,
+		// because it is not a secret. The private key has NO flag on purpose: a
+		// command argument is visible in the process list to every other process
+		// on the machine, so it arrives from the environment alone.
+		vapidGen  = flag.Bool("vapid-keys", false, "make a VAPID keypair, print it and exit. The private key is a secret: put it in the encrypted store, never in the repository")
+		vapidPub  = flag.String("vapid-public", os.Getenv("TEHA_VAPID_PUBLIC_KEY"), "the VAPID public key. Push stays off without it and without TEHA_VAPID_PRIVATE_KEY")
+		vapidSub  = flag.String("vapid-subject", envOr("TEHA_VAPID_SUBJECT", "https://github.com/lightheaded/teha"), "the VAPID subject: a mailto: address or an https: URL that a push service can use to reach the operator")
+		pushEvery = flag.Duration("push-interval", 30*time.Second, "how often the reminder scheduler looks for due reminders")
 	)
 	flag.Parse()
 
 	if *version {
 		fmt.Println("teha " + buildVersion)
 		return
+	}
+
+	if *vapidGen {
+		os.Exit(printVAPIDKeys())
 	}
 
 	level := slog.LevelInfo
@@ -115,6 +128,25 @@ func main() {
 
 	apiSrv := api.New(st, tok, log)
 
+	// The reminder scheduler. Both keys are necessary: a public key alone
+	// cannot sign, and a private key alone gives the browser nothing to
+	// subscribe with. Without them the server runs exactly as before and the
+	// settings area says that push is off.
+	var sender *push.Sender
+	vapidPriv := os.Getenv("TEHA_VAPID_PRIVATE_KEY")
+	switch {
+	case *vapidPub != "" && vapidPriv != "":
+		sender = push.New(st, push.Keys{Public: *vapidPub, Private: vapidPriv, Subject: *vapidSub}, log)
+		sender.Interval = *pushEvery
+		sender.Notify = apiSrv.Notify
+		apiSrv.Push = sender
+	case *vapidPub != "" || vapidPriv != "":
+		log.Warn("push needs both keys, so it stays off",
+			"have_public", *vapidPub != "", "have_private", vapidPriv != "")
+	default:
+		log.Info("push is off: no VAPID keys. Run `teha -vapid-keys` to make a pair")
+	}
+
 	mux := http.NewServeMux()
 	mux.Handle("/v1/", apiSrv.Routes())
 	// Off unless the operator asks for it. A task list is a map of a person's
@@ -142,6 +174,10 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	if sender != nil {
+		go sender.Run(ctx)
+	}
 
 	go func() {
 		log.Info("teha is listening", "addr", *addr, "db", *dbPath, "auth", tok != "")
