@@ -141,6 +141,7 @@ the screen, a log line or an error message.
 | `/v1/sync` | POST | `{since, commands[]}` in, changed rows out. At most 200 commands per request, at most 4 MB. |
 | `/v1/tasks` | GET | `?filter=`, `?limit=`, `?offset=`. At most 500 rows. |
 | `/v1/projects` | GET | Every project. |
+| `/v1/sections` | GET | Every section, in the order of its project. |
 | `/v1/labels` | GET | Every label. |
 | `/v1/export` | GET | The whole account as one JSON file. |
 | `/v1/events` | GET | Server-sent events. One `version` event per write, and a ping every 25 seconds. |
@@ -173,6 +174,7 @@ A wrong token returns to the form with the message `That token did not match.`
 | Quick add box | One line makes one task. Press Enter. |
 | Hint line | What the parser found, as you type. |
 | Task list | Groups in this order: Overdue, Today, Tomorrow, then one group per date, then No date. |
+| Board button | In a project view only. It swaps the list for a board of columns, and back. |
 | The circle | Click it to complete the task. |
 | The rest of the row | Click it to open the detail sheet. |
 | Overdue section head | A **Reschedule** button. It moves every overdue task in the view. |
@@ -192,6 +194,31 @@ The built-in views are filter queries:
 | Priority 1 | `p1` |
 
 A project entry in the sidebar runs `#<project name>`.
+
+### The board layout
+
+A project view has two layouts. The **Board** button in the header, and the `b`
+key, swap the list for one column per section. The first column holds the tasks
+with no section, so a task is never hidden because nobody filed it. The choice
+is saved, so a reload keeps the board.
+
+A board arranges work by hand, so a column is in the manual order, not in date
+order. That is the difference between the two layouts.
+
+| To do this | Pointer | Keyboard |
+|---|---|---|
+| Move a task to another column | Drag the card into the column | `H` and `L` |
+| Move a task inside a column | Drag it above or below a card | `J` and `K` |
+| Move the cursor between columns | Click a card | `h` and `l`, or the arrow keys |
+| Reorder the columns | Drag a column head | `<` and `>` |
+| Add a section | Type in the last column and press Enter | `n`, then the name and Enter |
+| Rename or delete a section | Click the column name | Tab to the column name, then Enter |
+
+**A deleted section keeps its tasks.** They stay in the project and move to the
+first column. **Undo** puts the heading back and files the tasks into it again.
+
+A section belongs to one project. A task therefore carries its project and its
+section in one command, so the pair can never disagree.
 
 The list order is the due date, then the priority, then the title. A task with
 no date goes last.
@@ -276,6 +303,12 @@ it loses focus. The sheet never waits for the server.
 | `Shift+T` | Move every overdue task in the view to today. |
 | `s` | Pick the selected task for a bulk action. |
 | `Shift+A` | Pick every task in the view. |
+| `b` | Swap the list and the board, in a project view. |
+| `h`, `l`, arrow left, arrow right | On the board: move to the column on the left or the right. |
+| `Shift+H`, `Shift+L` | On the board: carry this task one column left or right. |
+| `Shift+J`, `Shift+K` | On the board: move this task down or up inside its column. |
+| `<`, `>` | On the board: move this column left or right. |
+| `n` | On the board: move the cursor into the Add a section field. |
 | Command or Control, and click | Pick one task. |
 | Shift and click | Pick a run of tasks. |
 | `e` or `o` | Open the detail sheet. |
@@ -317,7 +350,7 @@ quietly shows the wrong rows.
 
 | The browser knows | The browser does not know |
 |---|---|
-| `today`, `tod`, `tomorrow`, `overdue`, `od`, `week`, `next 7 days`, `no date`, `recurring`, `subtask`, `done`, `completed`, `no priority`, `p1` to `p4`, `#Project`, `#inbox`, `%label`, `@label`, `search: text`, a bare word, and the operators `&`, `|`, `,`, `!` | `##Project`, `#Project*`, `%label*`, `no label`, `before:`, `after:`, `date:`, `deadline`, `deadline:`, `created:`, `yesterday`, `no time`, `has time`, `top level`, `no parent`, `started`, `deferred`, `wont do`, parentheses |
+| `today`, `tod`, `tomorrow`, `overdue`, `od`, `week`, `next 7 days`, `no date`, `no section`, `recurring`, `subtask`, `done`, `completed`, `no priority`, `p1` to `p4`, `#Project`, `#inbox`, `/Section`, `%label`, `@label`, `search: text`, a bare word, and the operators `&`, `|`, `,`, `!` | `##Project`, `#Project*`, `/Section*`, `%label*`, `no label`, `before:`, `after:`, `date:`, `deadline`, `deadline:`, `created:`, `yesterday`, `no time`, `has time`, `top level`, `no parent`, `started`, `deferred`, `wont do`, parentheses |
 
 One more difference: in the browser `#Trip` finds `Trip to Setomaa` by prefix.
 On the server `#Trip` needs the exact project name. Read
@@ -509,6 +542,9 @@ or a weekday name. A weekday name means its next occurrence, never today.
 | `#Name` | The project with that exact name. |
 | `#Name*` | Every project whose name starts with `Name`. |
 | `#inbox` | The inbox. |
+| `/Name` | The section with that exact name, in any project. |
+| `/Name*` | Every section whose name starts with `Name`. |
+| `no section` | Tasks in no section. |
 | `##Name` | That project and every sub-project under it. |
 | `%label`, `@label` | Tasks with that label. |
 | `%lab*`, `@lab*` | Tasks with a label that starts with `lab`. |
@@ -794,13 +830,13 @@ With `-dev`, the server needs no header at all.
 | `add_tasks` | `tasks[]`: `title`, `project`, `due`, `time`, `priority`, `labels`, `repeat`, `description`, `start_date`, `deadline`, `parent_id` | `{"ok":2,"ids":[...],"errors":[...],"v":25}` |
 | `update_tasks` | `tasks[]`: `id`, plus any field above, plus `clear[]` | The same write shape |
 | `complete_tasks` | `ids[]`, `wont_do` | The same write shape |
-| `list_projects` | none | `{"projects":[{"id":"p_home","name":"Home","open":3}]}` |
+| `list_projects` | none | `{"projects":[{"id":"p_home","name":"Home","open":3,"sec":[{"id":"x_plan","n":"Plan"}]}]}` |
 | `add_project` | `name`, `color` | The same write shape |
 | `search` | `text`, `limit` (default 50) | `{"t":[...],"n":1}` |
 | `plan_day` | none | Overdue, due today, and the undated pile by project |
 
-`clear[]` accepts six field names: `due_date`, `due_time`, `rrule`,
-`start_date`, `deadline` and `parent_id`. Any other name fails.
+`clear[]` accepts seven field names: `due_date`, `due_time`, `rrule`,
+`start_date`, `deadline`, `parent_id` and `section_id`. Any other name fails.
 
 `repeat` takes an RRULE string, for example `FREQ=WEEKLY;BYDAY=MO`. The server
 validates the rule before it writes.
@@ -828,6 +864,7 @@ The answer drops every empty field, to save tokens.
 | `sub` | True when the task has a parent |
 | `d` | The description, on request only |
 | `st` | The state, when it is not open |
+| `sec` | The sections of a project, in `list_projects`. `n` is the name. |
 
 ### A real `plan_day` answer
 
@@ -896,7 +933,8 @@ documented Todoist limits, and it writes in batches of 100 commands.
 | A repeat string | An RRULE. `every!` sets the from-completion flag. |
 | A sub-task | `parent_id` |
 | A completed task | The task, then a completion command |
-| A section name | The first line of the description |
+| A section | A section row in the same project |
+| A task in a section | `section_id` |
 | A task comment | The end of the description |
 | The child order | `order_key` |
 
@@ -911,6 +949,8 @@ The importer converts 33 recurrence forms, among them `every other week`,
 | An archived project | Skipped and counted in the summary |
 | The completed archive | A full sync does not send it. The summary reports the count that Todoist gives. |
 | A project comment | Skipped and counted |
+| A section in an archived project | Skipped and counted. Its tasks reach the inbox with no section. |
+| The folded text of an earlier import | It stays. Read the paragraph below. |
 | A repeat rule that does not convert, such as `every 3 hours` or `every 4th thursday of november` | The task still arrives. The original words go into the description. |
 | A time inside a repeat rule, such as `every day at 10:00` | The rule becomes `FREQ=DAILY`. The time survives in the due time. |
 | Filters, reminders, attachments, assignees and karma | Not read at all |
@@ -933,6 +973,18 @@ Commands: 0, failed: 0.
 
 Run `--dry-run` first, read the summary, then run the real import.
 
+### A section name that an earlier import folded
+
+Before the section table existed, the importer wrote the section name as the
+first line of the description, as `Section: Errands`. **A re-import does not
+clean that line.** The task matches by `source_ref`, so the importer keeps the
+row it already has and writes nothing.
+
+There is no migration for it, and there will not be one: a migration would have
+to guess which lines of a description are a folded section name and which are a
+note that a person wrote. Edit the description of those tasks, or delete the
+account file and import again from Todoist.
+
 ---
 
 ## 8. What does not work yet
@@ -954,8 +1006,8 @@ no assignee, no push notification, no comment and no attachment.
 keeps it in a cookie. A leaked token needs a new `TEHA_TOKEN` and a restart,
 and then every client logs in again.
 
-**No sections, no board, no calendar.** The importer folds a Todoist section
-name into the description, because there is no section table.
+**No calendar layout.** Sections and the board layout ship. A calendar with a
+month and a week view, and a drag to reschedule, does not.
 
 **The browser stores its state in `localStorage`,** not in OPFS with SQLite.
 That is enough for thousands of tasks. It needs a replacement before it holds a

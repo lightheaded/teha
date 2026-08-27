@@ -257,7 +257,7 @@ Auth: a per-device bearer token in Phase 1. Claude Code connects with `claude mc
 |---|---|---|---|
 | M0 Bootstrap | Name, repository, licence, CI, plan | First signed commit, green CI | Name chosen (teha). CI written. Licence and the first commit are open. |
 | M1 Core server | Schema, sync, filters, recurrence, export, import | Todoist account imports with zero loss. Property test converges. | Schema, sync, filters, recurrence and export run and carry tests. Import and the property test are open. |
-| M2 Web | Views, quick add, keyboard, offline, PWA | Author uses the web app for one week without Todoist | Views, quick add, the task detail, the keyboard, offline and the service worker run. The week has not started. |
+| M2 Web | Views, quick add, keyboard, offline, PWA | Author uses the web app for one week without Todoist | Views, quick add, the task detail, the keyboard, offline and the service worker run. A project view also draws its sections as a board, with drag and with keys. The week has not started. |
 | M3 MCP | Tools, token auth, Claude Code config | An agent plans the day in three calls, never times out | Eight tools, stateless transport, token auth. `plan_day` answers in one call and 114 tokens. |
 | M4 Android | Offline core, tile, share, gestures, Obtainium | Author uninstalls Todoist from the phone | Not started. |
 | M5 macOS | Tauri app, global shortcut, URL scheme | Author removes the Todoist hotkey | A command line client covers capture first. |

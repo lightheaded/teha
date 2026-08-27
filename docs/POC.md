@@ -166,7 +166,10 @@ public entry point.*
 - No sharing, no second account, no push, no comments, no attachments.
 - No passkeys. One device token guards everything, and the browser keeps it in
   a cookie.
-- No sections, no board layout, no calendar layout.
+- No calendar layout. Sections and the board layout now ship: a project
+  view draws its sections as columns, and the importer writes a section row
+  instead of a line of the description. A task that an EARLIER import wrote
+  still carries that line, and a re-import does not clean it.
 - Litestream replicates the cluster database and reports a matching transaction
   id, but nobody has rehearsed a restore from those files.
 - The web app stores its state in `localStorage`, not in OPFS with SQLite. That
@@ -211,5 +214,6 @@ detail screen, and both clients gained multi-select with five bulk actions.*
    until an account exists that is not the owner's device token. This is what
    unlocks the household milestone.
 4. **Reminders and notifications.** Web Push with VAPID, per D-003.
-5. **Sections and a board layout.** The importer folds a Todoist section name
-   into the description today, because there is no section table.
+5. ~~**Sections and a board layout.**~~ Done. The section table, the `/section`
+   filter term, the importer mapping, the board layout in the browser and the
+   sections in `list_projects` all ship. The calendar layout is still open.

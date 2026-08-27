@@ -207,7 +207,8 @@ the same server. Keep the real token out of the file:
 ```
 
 The tools are `list_tasks`, `add_tasks`, `update_tasks`, `complete_tasks`,
-`list_projects`, `add_project`, `search` and `plan_day`. They take the same
+`list_projects`, `add_project`, `search` and `plan_day`. `list_projects` also
+reports the sections of each project, and `/Name` filters by one. They take the same
 filter language as `teha ls`.
 
 ## Troubleshooting

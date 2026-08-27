@@ -297,3 +297,46 @@ one request, one transaction, and a row nobody named does not move.
 
 **Reverses if:** a batch ever grows past what one request can hold. The answer
 then is paging over ids, not a query inside a command.
+
+---
+
+## D-009 — A new column arrives through an ALTER in code, not through schema.sql
+
+**Date:** 2026-08-27 · **Status:** done
+
+`internal/store/schema.sql` runs on every start, and every statement in it says
+`CREATE TABLE IF NOT EXISTS`. That is what makes a start idempotent, and it is
+also the trap: the clause does nothing at all to a table that already exists, so
+a column added to the `task` block in that file never reaches an account that
+already has the file. The account keeps working until the first query names the
+column, and then every read fails with "no such column".
+
+`task.section_id` is therefore **not** in `schema.sql`. `Store.migrate` owns it:
+it reads `PRAGMA table_info`, and it runs
+`ALTER TABLE task ADD COLUMN section_id TEXT REFERENCES section(id)` only when
+the column is absent. SQLite has no `ADD COLUMN IF NOT EXISTS`, so the read
+before the write is the whole mechanism. The index on the new column lives there
+too, because `schema.sql` runs before the ALTER.
+
+**Why this shape, and not a version number.** A fresh file and an old file take
+the same path: the column is missing from both after `schema.sql`, so both take
+the ALTER. There is one code path and no `user_version` to keep in step with a
+list of migration steps. A step that is already applied costs one `PRAGMA` read
+per start.
+
+**Why the data is safe.** `ADD COLUMN` rewrites no row. SQLite records the new
+column in the table header, and a row written before the change reads the
+default for it, which is NULL here. A task in an upgraded account is therefore
+in no section, which is exactly what it was before the column existed. The
+version counter does not move either, so no client re-pulls the account.
+`TestUpgradeOfADatabaseWithoutTheColumn` builds a file the way the older build
+did, fills it, opens it with the current store and asks for every field back.
+With the migration switched off it fails with "no such column".
+
+The cost is that the shape of `task` is now in two places. The `section` block
+at the end of `schema.sql` says so, and points at `Store.migrate`.
+
+**Reverses if:** a change ever needs more than an added column, for example a
+narrowed type or a dropped column. SQLite needs the twelve-step table rebuild
+for those, and that needs a real migration list with a `user_version`. Add it
+then, and keep this mechanism for the added columns.

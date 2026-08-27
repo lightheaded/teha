@@ -78,13 +78,17 @@ it once and keeps it in a cookie. Passkeys replace this in a later milestone.
 - **Offline first.** Every edit lands in the local store and an outbox. The app
   works with the server down and drains the outbox when the server returns.
 - **One filter language** in the app, the API and the MCP tools: `today`,
-  `overdue`, `#Project`, `##Project`, `%label`, `p1`, `no date`, `recurring`,
-  `search:`, `before:`, `deadline:`, with `&`, `|`, `!` and parentheses.
+  `overdue`, `#Project`, `##Project`, `/Section`, `%label`, `p1`, `no date`,
+  `no section`, `recurring`, `search:`, `before:`, `deadline:`, with `&`, `|`,
+  `!` and parentheses.
 - **Recurrence** as RFC 5545 RRULE. A repeating task moves to its next date on
   completion, and a task months overdue moves to its next real slot.
 - **MCP server** at `/mcp`, specification revision 2026-07-28, stateless. Eight
   tools, batch writes, compact results. The daily plan costs one call and about
   460 bytes.
+- **Sections and a board.** A project holds sections. `b` swaps the list for a
+  board of columns, and the choice survives a reload. Drag a card to another
+  column, or drive the whole board from the keyboard.
 - **Keyboard**: `q` quick add, `j`/`k` move, `x` complete, `e` open the detail,
   `1`..`4` priority, `t`/`m`/`w` schedule, `u` undo, `?` the key list.
 
@@ -115,8 +119,8 @@ AGPL-3.0-or-later, the server:
 
   cmd/teha          the binary: server, seed, import, command line client
   internal/store    SQLite schema, commands, sync, queries
-  internal/api      HTTP: /v1/sync, /v1/tasks, /v1/projects, /v1/labels,
-                    /v1/events, /v1/export, /v1/health
+  internal/api      HTTP: /v1/sync, /v1/tasks, /v1/projects, /v1/sections,
+                    /v1/labels, /v1/events, /v1/export, /v1/health
   internal/mcpsrv   the MCP server and its tools
   internal/webui    the web app, embedded in the binary
   internal/todoist  the Todoist importer
