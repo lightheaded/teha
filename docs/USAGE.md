@@ -742,7 +742,7 @@ the same web app, with a quick add panel of its own:
 The panel takes the same line as `teha add`, and it gives the keyboard back to
 the application you came from. The shortcut is in **Settings** in the menu bar
 menu. The device token lives in the keychain, and the server address in a file
-with mode 600. See [DECISIONS.md](DECISIONS.md) D-009.
+with mode 600. See [DECISIONS.md](DECISIONS.md) D-015.
 
 The app also answers a URL, which is what a launcher wants:
 

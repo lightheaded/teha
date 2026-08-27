@@ -300,7 +300,7 @@ then is paging over ids, not a query inside a command.
 
 ---
 
-## D-009 — The desktop shell keeps the address in a file and the token in the keychain
+## D-015 — The desktop shell keeps the address in a file and the token in the keychain
 
 **Date:** 2026-08-27 · **Status:** done
 

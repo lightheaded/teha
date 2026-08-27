@@ -200,7 +200,7 @@ server address and the device token, then opens the app.
 
 - The address and the shortcut go into a JSON file with mode 600.
 - **The token goes into the keychain**, never into a file. See
-  [DECISIONS.md](DECISIONS.md) D-009.
+  [DECISIONS.md](DECISIONS.md) D-015.
 
 | Where | What it does |
 |---|---|
