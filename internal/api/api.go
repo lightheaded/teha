@@ -36,6 +36,9 @@ type Server struct {
 	SessionTTL time.Duration
 	// Now returns the current time. Tests replace it.
 	Now func() time.Time
+	// Push sends Web Push notifications. It is nil when the server holds no
+	// VAPID private key, and the push routes then say so.
+	Push Pusher
 
 	mu       sync.Mutex
 	watchers map[chan int64]struct{}
@@ -69,6 +72,10 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /v1/labels", s.guard(s.handleLabels))
 	mux.HandleFunc("GET /v1/export", s.guard(s.handleExport))
 	mux.HandleFunc("GET /v1/events", s.guard(s.handleEvents))
+	mux.HandleFunc("GET /v1/push/key", s.guard(s.handlePushKey))
+	mux.HandleFunc("POST /v1/push/subscribe", s.guard(s.handlePushSubscribe))
+	mux.HandleFunc("POST /v1/push/unsubscribe", s.guard(s.handlePushUnsubscribe))
+	mux.HandleFunc("POST /v1/push/test", s.guard(s.handlePushTest))
 	mux.HandleFunc("GET /v1/health", s.handleHealth)
 	s.passkeyRoutes(mux)
 	return mux
@@ -171,6 +178,9 @@ type syncResponse struct {
 	Projects []store.Project `json:"projects"`
 	Labels   []store.Label   `json:"labels"`
 	Tasks    []store.Task    `json:"tasks"`
+	// Reminders travel with every other row. A reminder is account data, so a
+	// client sees its own reminders on every device.
+	Reminders []store.Reminder `json:"reminders"`
 }
 
 func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
@@ -208,7 +218,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, syncResponse{
 		Version: delta.Version, Applied: results,
 		Projects: orEmpty(delta.Projects), Labels: orEmpty(delta.Labels),
-		Tasks: orEmpty(delta.Tasks),
+		Tasks: orEmpty(delta.Tasks), Reminders: orEmpty(delta.Reminders),
 	})
 }
 

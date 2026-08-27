@@ -45,6 +45,21 @@ spec:
                 secretKeyRef:
                   name: teha
                   key: TEHA_TOKEN
+            # Web Push. Both keys are optional: a server without them runs
+            # with push off. The public key is not a secret, and it sits in
+            # the same Secret only to keep the pair together.
+            - name: TEHA_VAPID_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: teha
+                  key: TEHA_VAPID_PUBLIC_KEY
+                  optional: true
+            - name: TEHA_VAPID_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: teha
+                  key: TEHA_VAPID_PRIVATE_KEY
+                  optional: true
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

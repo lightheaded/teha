@@ -28,3 +28,39 @@ self.addEventListener('fetch', (e) => {
     }).catch(() => caches.match(e.request).then((r) => r || caches.match('/')))
   );
 });
+
+// --- notifications ----------------------------------------------------------
+// The server sends the JSON that internal/push writes: title, body, tag, url,
+// task_id and kind. Those field names are the contract between the two.
+
+self.addEventListener('push', (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch (err) { d = {}; }
+  // The tag names the notification. Two messages with one tag collapse into
+  // one in the tray, so even a duplicate push shows the person one line.
+  e.waitUntil(self.registration.showNotification(d.title || 'teha', {
+    body: d.body || '',
+    tag: d.tag || 'teha',
+    renotify: false,
+    icon: '/icon.svg',
+    badge: '/icon.svg',
+    data: { url: d.url || '/', task_id: d.task_id || '' },
+  }));
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const data = e.notification.data || {};
+  const url = data.url || '/';
+  e.waitUntil((async () => {
+    const open = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const c of open) {
+      if (new URL(c.url).origin !== self.location.origin) continue;
+      // The app is open already. Tell it which task to show, then raise the
+      // window, rather than loading a second copy of the app.
+      c.postMessage({ type: 'open-task', task_id: data.task_id || '', url });
+      return c.focus();
+    }
+    return self.clients.openWindow(url);
+  })());
+});

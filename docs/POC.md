@@ -3,7 +3,8 @@
 *2026-08-25. Built against [PLAN.md](PLAN.md) milestones M1 to M3, plus the
 Todoist importer, a command line client and the deployment files.*
 
-Tests: 73 Go cases and 29 parser cases pass. `go vet` and `gofmt` are clean.
+Tests: 112 Go cases and 29 parser cases pass. `go vet` and `gofmt` are clean,
+and `go test -race ./internal/...` is clean as well.
 
 The plan makes four risky promises. This build tests each one with running code,
 not with a design note.
@@ -180,6 +181,35 @@ unknown user handle, an assertion with no user verification, and a registration
 without the token. A software authenticator in the test signs real bytes, so
 every check runs against a real ceremony rather than a mock.
 
+## 9. A reminder that arrives once, or not at all
+
+*Added 2026-08-27, milestone M6 in part.*
+
+`reminder` and `push_subscription` join the schema. A reminder is account data:
+it carries a version, it travels in the change log and every client sees it. A
+subscription is not, and it stays out of both, because an endpoint plus two keys
+is per-device plumbing that can push to that device.
+
+The scheduler wakes every 30 seconds, claims the due rows in one transaction
+and sends one Web Push message per device. Two rules make it safe, and both are
+under test:
+
+| Rule | How | Test |
+|---|---|---|
+| A reminder fires at most once | The claim marks `sent_at` in the same transaction that reads the row, and commits before any push leaves | Claim, close the database, open the file again, claim again. Nothing comes back. The same through the whole sender against an `httptest` push service: one request |
+| A missed reminder fires late only inside a window | One hour for a point reminder, four hours for a digest | Five kinds and delays, each one fires or drops, and the second pass always finds nothing |
+
+Failure handling matches what the push services answer: a 404 or a 410 deletes
+the subscription, a 429 parks it until `Retry-After` with the deadline on disk,
+and a service that accepts a connection and then hangs costs one deadline and
+never the scheduler.
+
+The race detector earned its place here. `webpush-go` v1.4.0 appends to the
+message slice a caller hands it, so two devices in one pass wrote into one
+array. Each send now copies. Nothing about that is visible without `-race`.
+
+The full detail is in [DECISIONS.md](DECISIONS.md) D-010 and D-011.
+
 ## What this build does not have
 
 *Updated 2026-08-26. The Android app now ships, and the server runs behind the
@@ -189,7 +219,11 @@ public entry point.*
   covers two views only: Today and All open. The browser has six built-in views
   plus one per project, so the phone cannot reach a project list at all. This is
   the largest gap that remains between the two clients.
-- No sharing, no second account, no push, no comments, no attachments.
+- No sharing, no second account, no comments, no attachments.
+- Push works in the browser and in the installed web app, and nowhere else.
+  The Android app fires its own local reminders from Room, which needs no
+  subscription. A comment or an assignment sends no notification, because there
+  is no second account to send one to.
 - No password fallback and no second factor beyond the passkey itself. The
   browser now signs in with a passkey, and the device token is the fallback and
   the credential every native client uses.
@@ -239,6 +273,7 @@ detail screen, and both clients gained multi-select with five bulk actions.*
    shell and MCP. The partner still cannot use the app, because one account and
    one user handle is all the server holds. Sharing, an invite that is not the
    owner's token, and a session row per account are the household milestone.
-4. **Reminders and notifications.** Web Push with VAPID, per D-003.
-5. **Sections and a board layout.** The importer folds a Todoist section name
+4. **Sections and a board layout.** The importer folds a Todoist section name
    into the description today, because there is no section table.
+5. **A reminder in quick add.** `remind me at 8` parses in no client yet. The
+   reminder is set in the task detail sheet.

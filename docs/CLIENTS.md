@@ -8,6 +8,11 @@ only: WebAuthn needs a browser and a person's gesture, so a shell and an agent
 cannot use one. The token is therefore not going away. Read
 [USAGE.md](USAGE.md#passkeys) for the browser side.
 
+||||||| 01c9321
+Notifications are a browser feature, so the web app carries them. Open settings
+with the gear in the header, or with the comma key. The command line client and
+the MCP server set no reminder yet, and the MCP tool list below says so.
+
 Every example uses the default address `http://127.0.0.1:8637`.
 
 ## Install
@@ -214,6 +219,11 @@ the same server. Keep the real token out of the file:
 The tools are `list_tasks`, `add_tasks`, `update_tasks`, `complete_tasks`,
 `list_projects`, `add_project`, `search` and `plan_day`. They take the same
 filter language as `teha ls`.
+
+No tool sets a reminder. An agent can give a task a due date and a due time,
+and a person then arms the notification in the web app. The commands exist on
+the sync endpoint (`reminder_add`, `reminder_update`, `reminder_delete`), so a
+tool is a small addition when something needs one.
 
 ## Troubleshooting
 

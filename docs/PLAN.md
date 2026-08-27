@@ -57,7 +57,7 @@ Phase 1 is solo daily driving with import from Todoist. Phase 2 makes it a house
   already exists for the phone, the shell and MCP, so a third secret with its
   own Argon2id parameters would buy nothing. Enrolment sits behind the token,
   which is what makes signup invite-only. See [DECISIONS.md](DECISIONS.md) D-009.
-- Data model: projects (nested), sections, tasks (nested), labels, filters, comments (text only), reminders (schema only), completed history, activity log.
+- Data model: projects (nested), sections, tasks (nested), labels, filters, comments (text only), reminders (table, scheduler and Web Push, see DECISIONS.md D-010 and D-011), completed history, activity log.
 - Sync endpoint: `POST /v1/sync` with `since` version and a command batch. Version counter per account. Client UUIDs and temp ids. Last-write-wins per field. Fractional index for order.
 - Filter language, evaluated in SQL. Todoist's grammar, so imported filters keep working: `#project`, `##project` (with sub-projects), `/section`, `%label` with `@label` as an accepted alias (Todoist retires `@` in filters through 2026), `p1`..`p4`, `today`, `tomorrow`, `overdue`, `no date`, `no time`, `date before:`, `date after:`, `deadline:`, `created:`, `recurring`, `subtask`, `assigned to:`, `search:`, `*` wildcards, `\` escape, `&`, `|`, `!`, parentheses, and `,` for several lists in one saved filter.
 - Three documented gaps in Todoist filters that we close from day one: query comment text, show completed tasks, and show a parent task together with its sub-tasks in one result ([introduction to filters](https://www.todoist.com/help/articles/introduction-to-filters-V98wIH)).
@@ -109,6 +109,7 @@ Phase 1 is solo daily driving with import from Todoist. Phase 2 makes it a house
 
 - Household space: projects shared with one other account, assignee per task, "assigned to me" filter, comments with attachments (images, files, up to a size cap), reactions.
 - Push notifications: UnifiedPush through ntfy for Android, Web Push for browsers and iOS PWA. Reminder at time, before due, daily digest, comment and assignment notifications.
+  - **Web Push runs since 2026-08-27**, with the three reminder kinds: at the due time, before the due time and a daily digest. `internal/push` holds the scheduler and the sender. Comment and assignment notifications wait for the second account. UnifiedPush waits until one transport proves too little.
 - Shopping mode per project: items grouped by category (learned from history, editable), big check targets, recently bought suggestions, quantity in the title (`2x milk`), live sync while two people are in the store, checked items collapse and clear on request.
   - **Loose categories, not a store map.** Aisle order differs per shop, so a real map is a modelling job with a maintenance burden per shop and little payoff. Learn a category order from what the household actually buys, and let a person drag it. Revisit only if the loose grouping proves useless in a real shop.
   - **It must work in split screen.** The shop's own scanner app is open beside it, so the layout has to hold at roughly half the screen width, with touch targets that survive one-handed use in a cold aisle. Test at that width, not only at full width.
@@ -238,6 +239,7 @@ Auth: a per-device bearer token in Phase 1. Claude Code connects with `claude mc
 ### 6.7 Deployment
 
 - **Container**: distroless image, one binary, `/data` volume with the SQLite file and attachments. Environment for the base URL, the data directory, the S3 target for Litestream. `docker compose` example in the repository for self-hosters.
+- **Push keys**: `TEHA_VAPID_PUBLIC_KEY` in the deployment, `TEHA_VAPID_PRIVATE_KEY` in the secret. `teha -vapid-keys` makes the pair. The private key never enters an image, a manifest or this repository. See [DEPLOY.md](DEPLOY.md) and [DEV-SECRETS.md](DEV-SECRETS.md).
 - **Cluster**: kustomize manifests in the private infrastructure repository, one replica (SQLite), PVC, `IngressRoute` on both the private and the public entrypoint, SOPS secrets. Public manifests in this repository show a generic example without hostnames.
 - **Android**: Obtainium against GitHub Releases. `ci.yml` publishes one release per build, tagged `v<versionName>`, `versionName` carries the run number, `versionCode` increases per build, the signing key never changes, the repository is public. Shizuku paired once for silent installs. F-Droid later with reproducible builds.
 - **macOS**: `.dmg` and `.zip` in the same GitHub release. Unsigned in Phase 1.
@@ -265,7 +267,7 @@ Auth: a per-device bearer token in Phase 1. Claude Code connects with `claude mc
 | M3 MCP | Tools, token auth, Claude Code config | An agent plans the day in three calls, never times out | Eight tools, stateless transport, token auth. `plan_day` answers in one call and 114 tokens. |
 | M4 Android | Offline core, tile, share, gestures, Obtainium | Author uninstalls Todoist from the phone | Not started. |
 | M5 macOS | Tauri app, global shortcut, URL scheme | Author removes the Todoist hotkey | A command line client covers capture first. |
-| M6 Household | Sharing, comments, push, shopping mode | Partner uses it for groceries for one month without asking for Todoist. Two phones tick items in the same shop and neither buys a duplicate | Not started. The partner uses Android, so the app matters more than the PWA. |
+| M6 Household | Sharing, comments, push, shopping mode | Partner uses it for groceries for one month without asking for Todoist. Two phones tick items in the same shop and neither buys a duplicate | Push runs: reminders, a daily digest and Web Push to the browser and the installed app. Sharing, comments and shopping mode are open, and they need the second account first. The partner uses Android, so the app matters more than the PWA. |
 | M7 Beyond | Start dates, snooze, dependencies, review, macros, Obsidian bridge | A trip is planned in the vault and shopped from the app | Schema carries start date, deadline and `wont_do` already. |
 | M8 Open | F-Droid, docs, hosted pilot | A stranger self-hosts from the README in under 15 minutes | Dockerfile, compose, kustomize and a deployment guide exist. |
 
@@ -273,7 +275,8 @@ Auth: a per-device bearer token in Phase 1. Claude Code connects with `claude mc
 
 Decisions with a lasting consequence live in [DECISIONS.md](DECISIONS.md):
 the licence split (D-001), the Android parser binding (D-002), Web Push
-(D-003) and the iOS answer (D-004).
+(D-003), the iOS answer (D-004), the once-only reminder (D-010) and the
+missed-reminder window (D-011).
 
 Three choices in this plan changed when the code met reality. Each one is small, and each one has a reason.
 
@@ -356,6 +359,7 @@ Settled by research on 2026-08-25:
 - Todoist filters now use `%label`, not `@label`. The free plan is called Beginner.
 - The MCP specification revision to build against is 2026-07-28, and it is stateless.
 - Versions to pin: `modernc.org/sqlite` v1.57.0, `github.com/go-webauthn/webauthn` v0.18.0, Litestream v0.5.16, Room 2.8.4, Glance 1.1.1, Tauri v2.11.5, MCP Go SDK v1.7.0, Svelte 5.56.
+- Added 2026-08-27: `github.com/SherClockHolmes/webpush-go` v1.4.0, the Web Push sender. It is the only maintained Go implementation of RFC 8291 and RFC 8292. It pulls `golang-jwt/jwt/v5` and `golang.org/x/crypto` with it. Two facts to keep in mind at an upgrade: the module has no `/v2` path, and v1.4.0 appends to the message slice a caller hands it, so a concurrent sender must copy the payload per send.
 - The public entry point preserves the client address, so per-IP lockout works.
 - `rrule-go` is the only serious Go RRULE library, and it is stale. The build wraps it.
 - No existing open-source project fits. Vikunja comes closest and has no tile, no strong parser and no official MCP server.
