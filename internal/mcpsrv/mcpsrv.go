@@ -37,7 +37,8 @@ import (
 
 const filterHelp = `A filter is a query string. Terms: today, tomorrow, overdue, no date, ` +
 	`recurring, subtask, done, started, deferred, p1..p4, no priority, deadline, no deadline, ` +
-	`#Project, ##Project (with sub-projects), %label, search: text, before: <date>, after: <date>. ` +
+	`#Project, ##Project (with sub-projects), /Section, no section, %label, search: text, ` +
+	`before: <date>, after: <date>. ` +
 	`Operators: & (and), | (or), ! (not), parentheses. Example: "overdue | today & #Home & !%errand".`
 
 // Handler builds the MCP HTTP handler.
@@ -93,7 +94,7 @@ func (h *Handler) Server() *mcp.Server {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "list_projects",
-		Description: "List every project with its id, name and open task count.",
+		Description: "List every project with its id, name, open task count and sections. A section is a heading inside a project, and the filter term for one is /Name.",
 	}, h.listProjects)
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -389,15 +390,32 @@ func (h *Handler) completeTasks(ctx context.Context, req *mcp.CallToolRequest, a
 }
 
 type projectOut struct {
+	ID   string       `json:"id"`
+	Name string       `json:"name"`
+	Open int          `json:"open"`
+	Sec  []sectionOut `json:"sec,omitempty"`
+}
+
+// sectionOut carries the id and the name only. A per-section open count would
+// almost double the cost of this answer, and the model can get the same number
+// from list_tasks with a /Name term when it needs it.
+type sectionOut struct {
 	ID   string `json:"id"`
-	Name string `json:"name"`
-	Open int    `json:"open"`
+	Name string `json:"n"`
 }
 
 func (h *Handler) listProjects(ctx context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
 	ps, err := h.Store.Projects()
 	if err != nil {
 		return nil, nil, err
+	}
+	secs, err := h.Store.Sections()
+	if err != nil {
+		return nil, nil, err
+	}
+	byProject := map[string][]sectionOut{}
+	for _, sec := range secs {
+		byProject[sec.ProjectID] = append(byProject[sec.ProjectID], sectionOut{ID: sec.ID, Name: sec.Name})
 	}
 	out := make([]projectOut, 0, len(ps))
 	for _, p := range ps {
@@ -411,7 +429,7 @@ func (h *Handler) listProjects(ctx context.Context, req *mcp.CallToolRequest, _ 
 				open++
 			}
 		}
-		out = append(out, projectOut{ID: p.ID, Name: p.Name, Open: open})
+		out = append(out, projectOut{ID: p.ID, Name: p.Name, Open: open, Sec: byProject[p.ID]})
 	}
 	return structured(map[string]any{"projects": out})
 }
