@@ -168,15 +168,16 @@ func scanTask(rows *sql.Rows) (Task, error) {
 
 // Delta is everything that changed after a version.
 type Delta struct {
-	Version  int64     `json:"version"`
-	Projects []Project `json:"projects"`
-	Labels   []Label   `json:"labels"`
-	Tasks    []Task    `json:"tasks"`
+	Version   int64      `json:"version"`
+	Projects  []Project  `json:"projects"`
+	Labels    []Label    `json:"labels"`
+	Tasks     []Task     `json:"tasks"`
+	Reminders []Reminder `json:"reminders"`
 }
 
 // Pull returns every row with a version above since.
 func (s *Store) Pull(since int64) (Delta, error) {
-	d := Delta{Projects: []Project{}, Labels: []Label{}, Tasks: []Task{}}
+	d := Delta{Projects: []Project{}, Labels: []Label{}, Tasks: []Task{}, Reminders: []Reminder{}}
 	v, err := s.Version()
 	if err != nil {
 		return d, err
@@ -227,6 +228,20 @@ func (s *Store) Pull(since int64) (Delta, error) {
 		}
 		d.Tasks = append(d.Tasks, t)
 		ids = append(ids, t.ID)
+	}
+	rows.Close()
+
+	rows, err = s.db.Query(`SELECT `+reminderCols+` FROM reminder WHERE version > ? ORDER BY version`, since)
+	if err != nil {
+		return d, err
+	}
+	for rows.Next() {
+		r, err := scanReminder(rows)
+		if err != nil {
+			rows.Close()
+			return d, err
+		}
+		d.Reminders = append(d.Reminders, r)
 	}
 	rows.Close()
 

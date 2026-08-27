@@ -194,6 +194,27 @@ func applyOne(tx *sql.Tx, c Command, now, today string) (string, error) {
 			return "", err
 		}
 		return a.ID, nil
+	case "reminder_add":
+		var a ReminderArgs
+		if err := json.Unmarshal(c.Args, &a); err != nil {
+			return "", err
+		}
+		return reminderAdd(tx, a, now)
+	case "reminder_update":
+		var a ReminderArgs
+		if err := json.Unmarshal(c.Args, &a); err != nil {
+			return "", err
+		}
+		return a.ID, reminderUpdate(tx, a, now)
+	case "reminder_delete":
+		var a IDArgs
+		if err := json.Unmarshal(c.Args, &a); err != nil {
+			return "", err
+		}
+		if err := rowSet(tx, "reminder", a.ID, now, map[string]any{"deleted_at": now}); err != nil {
+			return "", err
+		}
+		return a.ID, nil
 	case "label_add":
 		var a LabelArgs
 		if err := json.Unmarshal(c.Args, &a); err != nil {
