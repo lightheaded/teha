@@ -7,7 +7,7 @@
 //
 //	today | tomorrow | overdue | od | no date | no time | recurring
 //	subtask | !subtask | done | p1..p4 | no priority
-//	#Project | ##Project | %label | @label | search: text
+//	#Project | ##Project | /Section | no section | %label | @label | search: text
 //	before: <date> | after: <date> | deadline | no deadline
 //	& (and) | (or) ! (not) ( ) , (or, one saved filter shows several lists)
 //
@@ -225,6 +225,8 @@ func (p *parser) term(word string) (string, []any, error) {
 		return "deadline IS NULL", nil, nil
 	case "deadline":
 		return "deadline IS NOT NULL", nil, nil
+	case "no section", "no sections":
+		return "section_id IS NULL", nil, nil
 	case "no label", "no labels":
 		return "id NOT IN (SELECT task_id FROM task_label)", nil, nil
 	case "started":
@@ -271,6 +273,18 @@ func (p *parser) term(word string) (string, []any, error) {
 				[]any{strings.TrimSuffix(name, "*") + "%"}, nil
 		}
 		return `project_id IN (SELECT id FROM project WHERE lower(name) = lower(?) AND deleted_at IS NULL)`,
+			[]any{name}, nil
+	case strings.HasPrefix(word, "/"):
+		// A section name follows the rules of a project name: an exact match,
+		// case-insensitive, and a trailing * for a prefix match. "Errand" and
+		// "Errands" are therefore two different sections, and a name that holds
+		// a % or a _ is literal text in the exact form.
+		name := strings.TrimSpace(word[1:])
+		if strings.HasSuffix(name, "*") {
+			return `section_id IN (SELECT id FROM section WHERE lower(name) LIKE lower(?) AND deleted_at IS NULL)`,
+				[]any{strings.TrimSuffix(name, "*") + "%"}, nil
+		}
+		return `section_id IN (SELECT id FROM section WHERE lower(name) = lower(?) AND deleted_at IS NULL)`,
 			[]any{name}, nil
 	case strings.HasPrefix(word, "%"), strings.HasPrefix(word, "@"):
 		// Todoist moved filters to %label and retires @ through 2026. Both work
