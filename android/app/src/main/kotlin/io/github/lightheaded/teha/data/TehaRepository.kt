@@ -3,6 +3,7 @@
 package io.github.lightheaded.teha.data
 
 import android.content.Context
+import androidx.sqlite.db.SimpleSQLiteQuery
 import io.github.lightheaded.teha.data.db.LabelEntity
 import io.github.lightheaded.teha.data.db.MetaEntity
 import io.github.lightheaded.teha.data.db.OutboxEntity
@@ -99,8 +100,30 @@ class TehaRepository(context: Context) {
     val labels: Flow<List<LabelEntity>> = db.labels().all()
     val outboxCount: Flow<Int> = db.outbox().countFlow()
 
-    fun todayTasks(today: String): Flow<List<TaskEntity>> = db.tasks().today(today)
-    fun openTasks(): Flow<List<TaskEntity>> = db.tasks().allOpen()
+    /**
+     * tasks reads one view.
+     *
+     * where comes from the shared filter compiler, and args are its arguments
+     * in order. The compiler gives a WHERE clause and nothing else, so the
+     * sort belongs here.
+     *
+     * One sort serves every view. An undated task sorts last, then the oldest
+     * day first, so an overdue task sits on top of the Today list with no
+     * second query and no grouping pass. Priority and the order key break the
+     * remaining ties.
+     *
+     * The arguments bind as text. SQLite gives a bound value the affinity of
+     * the column it meets, so a priority still compares as a number.
+     */
+    fun tasks(where: String, args: List<String>): Flow<List<TaskEntity>> =
+        db.tasks().filtered(
+            SimpleSQLiteQuery(
+                "SELECT * FROM tasks WHERE deletedAt IS NULL AND ($where) " +
+                    "ORDER BY (dueDate IS NULL), dueDate ASC, priority ASC, orderKey ASC",
+                args.toTypedArray(),
+            )
+        )
+
     fun task(id: String): Flow<TaskEntity?> = db.tasks().byIdFlow(id)
     fun subtasks(parentId: String): Flow<List<TaskEntity>> = db.tasks().children(parentId)
 

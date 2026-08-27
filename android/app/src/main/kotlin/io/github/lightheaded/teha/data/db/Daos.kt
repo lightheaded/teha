@@ -6,6 +6,8 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.RawQuery
+import androidx.sqlite.db.SupportSQLiteQuery
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -36,26 +38,21 @@ interface TaskDao {
     )
     fun children(parentId: String): Flow<List<TaskEntity>>
 
-    // The Today view. An overdue day sorts before today, so the list needs no
-    // second query and no grouping pass.
-    @Query(
-        """
-        SELECT * FROM tasks
-        WHERE deletedAt IS NULL AND state = 'open'
-          AND dueDate IS NOT NULL AND dueDate <= :today
-        ORDER BY dueDate ASC, priority ASC, orderKey ASC
-        """
-    )
-    fun today(today: String): Flow<List<TaskEntity>>
-
-    @Query(
-        """
-        SELECT * FROM tasks
-        WHERE deletedAt IS NULL AND state = 'open'
-        ORDER BY (dueDate IS NULL), dueDate ASC, priority ASC, orderKey ASC
-        """
-    )
-    fun allOpen(): Flow<List<TaskEntity>>
+    /**
+     * filtered reads the tasks of one view.
+     *
+     * Every view is a filter string that the shared Go compiler turns into a
+     * WHERE clause, so the phone reaches the same views as the browser and the
+     * same grammar as the server. TehaRepository.tasks builds the statement
+     * around that clause and binds the arguments in order.
+     *
+     * A raw query is the only way in: the clause is known at run time, so no
+     * annotation can hold it. observedEntities is what makes the Flow emit
+     * again after a sync writes a task, because Room cannot read the table
+     * name out of a string it never saw.
+     */
+    @RawQuery(observedEntities = [TaskEntity::class])
+    fun filtered(query: SupportSQLiteQuery): Flow<List<TaskEntity>>
 
     // Used when the server refuses a task_add. The row exists nowhere else, so
     // no later pull can remove it.
