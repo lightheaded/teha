@@ -28,6 +28,7 @@ const S = {
 };
 
 import { parseQuickAdd, newId, iso } from './parse.js';
+import * as pk from './passkey.js';
 
 const $ = (id) => document.getElementById(id);
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2));
@@ -826,6 +827,100 @@ function closeDetail() {
   S.detail = null;
 }
 
+// --- settings ---------------------------------------------------------------
+
+// openSettings holds the passkey area. A passkey signs this browser in without
+// the device token. The token stays: the phone, the command line client and MCP
+// all use it, and the server asks for it before it enrols a passkey.
+function openSettings() {
+  // closeDetail removes any open sheet, the task detail included, and clears
+  // the detail flag. A second press of the same button then closes this one.
+  const open = document.querySelector('.sheet');
+  closeDetail();
+  if (open) return;
+  const el = document.createElement('div');
+  el.className = 'sheet';
+  el.innerHTML = `<div class="card">
+    <div class="d-title">Settings</div>
+    <div class="d-hint">A passkey signs this browser in with a fingerprint, a face or a PIN.
+      The device token keeps working, and every native client uses it.</div>
+    <div class="d-lab" style="width:auto">Passkeys</div>
+    <div class="d-subs" id="pk-list"><div class="d-sub">Reading…</div></div>
+    <div class="d-row" id="pk-add-row">
+      <input id="pk-name" placeholder="Name this passkey, for example Phone" maxlength="60">
+      <button id="pk-add">Add</button>
+    </div>
+    <div class="d-err" id="pk-err"></div>
+    <div class="d-actions">
+      <button class="d-del" id="pk-out">Sign out</button>
+      <button class="d-close">Done</button>
+    </div>
+  </div>`;
+  const q = (sel) => el.querySelector(sel);
+  el.onclick = (ev) => { if (ev.target === el) el.remove(); };
+  q('.d-close').onclick = () => el.remove();
+
+  if (!pk.supported()) {
+    q('#pk-add-row').hidden = true;
+    q('#pk-err').textContent = 'This browser cannot make a passkey. Use the device token.';
+  }
+  q('#pk-add').onclick = async () => {
+    const btn = q('#pk-add');
+    q('#pk-err').textContent = '';
+    btn.disabled = true;
+    try {
+      await pk.enrol(q('#pk-name').value.trim());
+      q('#pk-name').value = '';
+      drawPasskeys(q('#pk-list'), q('#pk-err'));
+    } catch (e) {
+      q('#pk-err').textContent = enrolMessage(e);
+    }
+    btn.disabled = false;
+  };
+  q('#pk-out').onclick = async () => {
+    try { await pk.signOut(); } catch (e) { /* the cookie is gone either way */ }
+    location.href = '/login';
+  };
+  document.body.appendChild(el);
+  drawPasskeys(q('#pk-list'), q('#pk-err'));
+}
+
+// enrolMessage says what to do about a refused enrolment. The server asks for
+// the device token here, so a browser that only holds a passkey session has to
+// paste the token once.
+function enrolMessage(e) {
+  if (e && e.status === 401) {
+    return 'Paste the device token on the sign-in page first. The token is the invitation into this account.';
+  }
+  return pk.message(e);
+}
+
+async function drawPasskeys(host, errHost) {
+  try {
+    const rows = await pk.list();
+    if (!rows.length) {
+      host.innerHTML = '<div class="d-sub">No passkey yet. Add one to sign in without the token.</div>';
+      return;
+    }
+    host.innerHTML = rows.map((r) => `<div class="pk" data-id="${esc(r.id)}">`
+      + `<span>${esc(r.name)}</span>`
+      + `<span class="w">${r.last_used_at ? 'last used ' + esc(r.last_used_at.slice(0, 10)) : 'never used'}</span>`
+      + `<button class="rm">Remove</button></div>`).join('');
+    [...host.querySelectorAll('.pk')].forEach((row) => {
+      row.querySelector('.rm').onclick = async () => {
+        errHost.textContent = '';
+        try {
+          await pk.remove(row.dataset.id);
+          drawPasskeys(host, errHost);
+        } catch (e) { errHost.textContent = pk.message(e); }
+      };
+    });
+  } catch (e) {
+    host.innerHTML = '<div class="d-sub">Cannot read the passkeys.</div>';
+    errHost.textContent = pk.message(e);
+  }
+}
+
 // --- input ------------------------------------------------------------------
 
 function wire() {
@@ -854,6 +949,7 @@ function wire() {
     } else if (e.key === 'Escape') { qa.value = ''; qa.blur(); $('hint').innerHTML = ''; }
   });
   $('fab').onclick = () => qa.focus();
+  $('cog').onclick = () => openSettings();
 
   document.addEventListener('keydown', (e) => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
@@ -862,6 +958,11 @@ function wire() {
     }
     if (S.menu) {
       if (e.key === 'Escape') closeMenu();
+      return;
+    }
+    const sheet = document.querySelector('.sheet');
+    if (sheet && !S.detail) {
+      if (e.key === 'Escape') sheet.remove();
       return;
     }
     if (S.detail) {
@@ -904,6 +1005,7 @@ function wire() {
         break;
       case 'u': if (S.undo) { const u = S.undo.undo; S.undo = null; u(); } break;
       case 'e': case 'o': e.preventDefault(); openDetail(cur); break;
+      case ',': openSettings(); break;
       case '?': showKeys(); break;
       case 'g': S.view = { q: 'today', title: 'Today' }; S.sel = 0; render(); break;
       case 'r': sync(); break;
@@ -929,6 +1031,7 @@ function showKeys() {
     <dt>e</dt><dd>open the task detail</dd>
     <dt>u</dt><dd>undo the last action</dd>
     <dt>r</dt><dd>sync now</dd>
+    <dt>,</dt><dd>settings and passkeys</dd>
     <dt>g</dt><dd>go to Today</dd>
     <dt>?</dt><dd>this list</dd></dl></div>`;
   el.onclick = () => el.remove();
