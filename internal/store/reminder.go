@@ -44,7 +44,7 @@ func scanReminder(rows *sql.Rows) (Reminder, error) {
 // hours late is not a reminder, it is noise, and noise teaches a person to
 // ignore the next one. A reminder that arrives four minutes late after a
 // restart is exactly what the person wanted. So a late reminder fires once
-// inside the window and never outside it. See docs/DECISIONS.md D-010.
+// inside the window and never outside it. See docs/DECISIONS.md D-011.
 //
 // A digest gets a longer window than a point reminder, because a digest of
 // today is still worth reading at 11:00. A "call the garage at 09:00" at 14:00
@@ -206,7 +206,7 @@ type Claim struct {
 //     one, because the claim predicate is already false for the row.
 //
 // At most once, deliberately. A duplicate reminder is worse than a missing one:
-// it teaches the person that the notification means nothing. See D-009.
+// it teaches the person that the notification means nothing. See D-010.
 func (s *Store) ClaimDue(now time.Time, limit int) (Claim, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

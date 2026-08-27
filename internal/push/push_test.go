@@ -305,7 +305,7 @@ func TestAHangingPushServiceDoesNotStallTheScheduler(t *testing.T) {
 }
 
 // The whole once-only guarantee, end to end: one push leaves the process, the
-// process restarts, and no second push follows. See D-009.
+// process restarts, and no second push follows. See D-010.
 func TestOnceOnlyAcrossARestart(t *testing.T) {
 	var hits atomic.Int64
 	srv := pushService(t, func(w http.ResponseWriter, r *http.Request) {

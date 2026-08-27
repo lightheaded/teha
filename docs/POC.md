@@ -182,7 +182,7 @@ The race detector earned its place here. `webpush-go` v1.4.0 appends to the
 message slice a caller hands it, so two devices in one pass wrote into one
 array. Each send now copies. Nothing about that is visible without `-race`.
 
-The full detail is in [DECISIONS.md](DECISIONS.md) D-009 and D-010.
+The full detail is in [DECISIONS.md](DECISIONS.md) D-010 and D-011.
 
 ## What this build does not have
 

@@ -9,7 +9,7 @@
 // The scheduler wakes on an interval, claims every due reminder in one
 // transaction, and only then sends. The claim is the once-only guarantee and it
 // lives in the store, next to the SQL that enforces it. See
-// store.ClaimDue and docs/DECISIONS.md D-009 and D-010.
+// store.ClaimDue and docs/DECISIONS.md D-010 and D-011.
 package push
 
 import (

@@ -53,7 +53,7 @@ Phase 1 is solo daily driving with import from Todoist. Phase 2 makes it a house
 **Server**
 
 - Accounts with passkeys and a password fallback. Invite-only signup.
-- Data model: projects (nested), sections, tasks (nested), labels, filters, comments (text only), reminders (table, scheduler and Web Push, see DECISIONS.md D-009 and D-010), completed history, activity log.
+- Data model: projects (nested), sections, tasks (nested), labels, filters, comments (text only), reminders (table, scheduler and Web Push, see DECISIONS.md D-010 and D-011), completed history, activity log.
 - Sync endpoint: `POST /v1/sync` with `since` version and a command batch. Version counter per account. Client UUIDs and temp ids. Last-write-wins per field. Fractional index for order.
 - Filter language, evaluated in SQL. Todoist's grammar, so imported filters keep working: `#project`, `##project` (with sub-projects), `/section`, `%label` with `@label` as an accepted alias (Todoist retires `@` in filters through 2026), `p1`..`p4`, `today`, `tomorrow`, `overdue`, `no date`, `no time`, `date before:`, `date after:`, `deadline:`, `created:`, `recurring`, `subtask`, `assigned to:`, `search:`, `*` wildcards, `\` escape, `&`, `|`, `!`, parentheses, and `,` for several lists in one saved filter.
 - Three documented gaps in Todoist filters that we close from day one: query comment text, show completed tasks, and show a parent task together with its sub-tasks in one result ([introduction to filters](https://www.todoist.com/help/articles/introduction-to-filters-V98wIH)).
@@ -271,8 +271,8 @@ Auth: a per-device bearer token in Phase 1. Claude Code connects with `claude mc
 
 Decisions with a lasting consequence live in [DECISIONS.md](DECISIONS.md):
 the licence split (D-001), the Android parser binding (D-002), Web Push
-(D-003), the iOS answer (D-004), the once-only reminder (D-009) and the
-missed-reminder window (D-010).
+(D-003), the iOS answer (D-004), the once-only reminder (D-010) and the
+missed-reminder window (D-011).
 
 Three choices in this plan changed when the code met reality. Each one is small, and each one has a reason.
 

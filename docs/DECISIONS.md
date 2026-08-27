@@ -84,7 +84,7 @@ provides. Then Firebase becomes a second transport beside Web Push, not a
 replacement.
 
 **Built 2026-08-27.** `internal/push` sends with `webpush-go` v1.4.0. The
-scheduler, the once-only rule and the missed-window rule are D-009 and D-010.
+scheduler, the once-only rule and the missed-window rule are D-010 and D-011.
 The Android app still fires its own local reminders from Room, per PLAN.md §4,
 so a phone needs no subscription for a due time it already knows.
 
@@ -305,7 +305,7 @@ then is paging over ids, not a query inside a command.
 
 ---
 
-## D-009 — A reminder is claimed before it is sent, so it fires at most once
+## D-010 — A reminder is claimed before it is sent, so it fires at most once
 
 **Date:** 2026-08-27 · **Status:** done
 
@@ -346,7 +346,7 @@ second of the write-ahead log, so a `sent_at` written a minute ago survives. A
 restore to a named earlier moment can rewind a sent marker and re-arm the
 reminder. Two things bound the damage:
 
-- The grace window in D-010 drops every reminder that came due more than an
+- The grace window in D-011 drops every reminder that came due more than an
   hour ago, so a restore to yesterday sends nothing.
 - Each notification carries `tag: teha-<reminder id>`. A browser replaces a
   notification of the same tag, so a second copy shows one line in the tray and
@@ -366,7 +366,7 @@ retry policy and a de-duplication rule in every client. Nothing yet asks for it.
 
 ---
 
-## D-010 — A missed reminder fires late inside one hour, and never after that
+## D-011 — A missed reminder fires late inside one hour, and never after that
 
 **Date:** 2026-08-27 · **Status:** done
 

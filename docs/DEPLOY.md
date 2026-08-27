@@ -110,7 +110,7 @@ local reminder from its own database.
 The scheduler looks for due reminders every 30 seconds. `-push-interval`
 changes that. A reminder that came due while the server was down fires late
 only inside its window: one hour for a point reminder, four hours for a daily
-digest. See [DECISIONS.md](DECISIONS.md) D-009 and D-010.
+digest. See [DECISIONS.md](DECISIONS.md) D-010 and D-011.
 
 ## Run with Docker
 

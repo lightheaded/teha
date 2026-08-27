@@ -108,7 +108,7 @@ func TestClaimDueSelectsOnlyWhatIsActuallyDue(t *testing.T) {
 
 // A reminder must never fire twice, and a restart must not change that. The
 // claim marks the row in the same transaction that reads it, so the guarantee
-// survives anything that happens after the commit. See D-009.
+// survives anything that happens after the commit. See D-010.
 func TestClaimIsOnceOnlyAcrossARestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "restart.db")
 
@@ -143,7 +143,7 @@ func TestClaimIsOnceOnlyAcrossARestart(t *testing.T) {
 }
 
 // The server was down when the reminder came due. Inside the window it fires
-// late, once. Outside the window it is marked and dropped. See D-010.
+// late, once. Outside the window it is marked and dropped. See D-011.
 func TestAMissedReminderFiresLateOnlyInsideItsWindow(t *testing.T) {
 	cases := []struct {
 		name  string

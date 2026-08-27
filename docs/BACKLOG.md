@@ -8,7 +8,7 @@ DECISIONS.md holds the choices with a lasting consequence.
 
 ## Reminders and notifications
 
-Added 2026-08-27 with Web Push (D-003, D-009, D-010).
+Added 2026-08-27 with Web Push (D-003, D-010, D-011).
 
 ### Out of scope by design
 
@@ -40,7 +40,7 @@ Added 2026-08-27 with Web Push (D-003, D-009, D-010).
 - **One reminder per task in the web app.** The table holds any number. The
   detail sheet writes one, because two notifications for one chore is noise.
 - **No retry after a failure that is not a 429.** A 500 from a push service
-  loses that notification, per D-009. A retry needs a delivery attempt table.
+  loses that notification, per D-010. A retry needs a delivery attempt table.
 - **The scheduler polls every 30 seconds.** So a reminder can arrive up to 30
   seconds late. A person cannot feel that, and a timer per reminder costs a
   wake-up path that a restart must rebuild.
@@ -59,5 +59,5 @@ Added 2026-08-27 with Web Push (D-003, D-009, D-010).
   PLAN.md §8a says the same. It holds thousands of tasks and it must change
   before it holds a decade of history.
 - **Litestream restore is not rehearsed.** POC.md says so under "What this
-  build does not have". D-009 leans on the restore behaviour, so the rehearsal
+  build does not have". D-010 leans on the restore behaviour, so the rehearsal
   is worth more now than it was.

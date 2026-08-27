@@ -361,7 +361,7 @@ Two rules are worth knowing:
   that the server drops it. A notification about 09:00 is noise at 16:00, and
   the overdue task says the same thing better.
 
-[DECISIONS.md](DECISIONS.md) D-009 and D-010 hold the reasons.
+[DECISIONS.md](DECISIONS.md) D-010 and D-011 hold the reasons.
 
 ### The browser filter is a subset
 

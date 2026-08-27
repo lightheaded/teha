@@ -94,7 +94,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS task_fts USING fts5(task_id UNINDEXED, title,
 -- row. now >= fire_at at that moment, so the predicate is false for ever after
 -- for a one-shot reminder. A daily digest also moves fire_at forward by one
 -- day in that same transaction, so it becomes claimable again tomorrow and
--- never twice for the same day. See docs/DECISIONS.md D-009.
+-- never twice for the same day. See docs/DECISIONS.md D-010.
 CREATE TABLE IF NOT EXISTS reminder (
   id         TEXT PRIMARY KEY,
   task_id    TEXT REFERENCES task(id),  -- null for a daily digest
