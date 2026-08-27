@@ -62,7 +62,7 @@ type Schema struct {
 	InboxID string
 }
 
-// ServerSchema is the naming of internal/store/schema.sql.
+// ServerSchema holds the names of internal/store/schema.sql.
 var ServerSchema = Schema{
 	Task:      "task",
 	Project:   "project",
@@ -92,7 +92,7 @@ var ServerSchema = Schema{
 	InboxID: "inbox",
 }
 
-// RoomSchema is the naming of the Android database, which the Room entities in
+// RoomSchema holds the names of the Android database, which the Room entities in
 // android/app/src/main/kotlin/io/github/lightheaded/teha/data/db/Entities.kt
 // declare.
 //

@@ -93,7 +93,7 @@ func ParseQuickAdd(text, todayISO string) string {
 }
 
 // CompileFilter turns a filter query into a SQL WHERE clause and its
-// arguments, in the naming of the server database.
+// arguments, with the names of the server database.
 //
 //	{"sql":"(due_date IS NOT NULL AND due_date <= ?) AND state = 'open'",
 //	 "args":["2026-08-25"]}

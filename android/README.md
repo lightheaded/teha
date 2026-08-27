@@ -46,6 +46,39 @@ Notes on the mechanism:
 To add the tile, open the Quick Settings panel, edit the tiles, and drag
 **teha add** into the panel.
 
+## Reach a view, a project or any filter
+
+The menu button in the top bar opens the list of views. A swipe from the left
+edge does the same. The top bar then names the view on screen.
+
+| Row | Shows |
+|---|---|
+| Today | Every task due today or earlier |
+| Overdue | Every task with a day before today |
+| Next 7 days | Every task due inside the week |
+| Inbox | The inbox project |
+| No date | Every open task with no day |
+| Priority 1 | Every p1 task |
+| All open | Every open task |
+| One row per project | That project, by name |
+
+The first six rows are the six views of the browser, and they carry the same
+queries. Under them is one row per project.
+
+The field above the list takes any query of the filter language: `overdue &
+#Home`, `%errand & no date`, `search: ferry`. An empty field means every open
+task. The phone calls the same Go compiler that the server runs, through the
+gomobile binding, so it reads every term the server reads. A query the compiler
+refuses keeps the list open and shows the reason under the field, and the reason
+names the position that failed.
+
+One term does not work here: `created:`. The local database keeps no creation
+date, so the phone says so instead of showing the wrong rows.
+
+Every view sorts the same way. A task with no day goes last, the oldest day
+comes first, and priority breaks the tie. An overdue task therefore sits on top
+of the Today list.
+
 ## Move every overdue task
 
 When the list holds a late task, a bar appears above it and says how many are
@@ -167,14 +200,20 @@ safe. The user interface is Jetpack Compose with Material 3, and it reads Room
 through Kotlin Flow. The quick add field calls the gomobile binding on each
 keystroke and shows a chip for each field that the parser found.
 
+A view is a filter string. `Mobile.compileFilterRoom` turns it into a `WHERE`
+clause with the names of the Room tables, and a `@RawQuery` DAO method runs that
+clause and binds its arguments in order. The compiler is the one the server
+runs: it takes the table and column names as a value, so one grammar reads two
+databases. D-009 in [../docs/DECISIONS.md](../docs/DECISIONS.md) gives the
+reason, and `filter/schema.go` holds the mapping.
+
 ## Limits
 
 - The app polls. It calls sync when a screen opens and on a pull-to-refresh. It
   does not read `GET /v1/events`, and it has no background sync and no
   notifications.
-- The task list shows two views: Today and All open. There is no project view
-  and no filter field yet, although the binding exposes `CompileFilter`. This is
-  now the largest gap against the browser.
+- The list carries no drag to reorder. The server holds an order key per task,
+  and the phone reads it and never writes it. The browser cannot reorder either.
 - A comment, an attachment and a notification do not exist on the phone,
   because they do not exist on the server either.
 - Cleartext HTTP is permitted, because a self-hosted server often runs on a
@@ -195,7 +234,7 @@ data.
 |---|---|---|
 | 1 | A capture from the tile starts a sync that `finish()` then cancels | The capture waits for the next app launch. The uuid dedupe covers the resend, so nothing is lost. The fix needs an application-scoped coroutine. |
 | 2 | The encrypted preference file and the database open on the main thread | Keystore work and file input happen before the first frame. StrictMode reports it, and a slow device can show an ANR. |
-| 3 | A label whose name holds a comma splits into two labels on the phone | Display only. The quick add parser cannot make such a name, but the MCP server and the importer can. |
+| 3 | A label whose name holds a comma splits into two labels on the phone | Display, and a filter. `%first` finds a task whose label is `first, second`. The quick add parser cannot make such a name, but the MCP server and the importer can. No client can name it in a filter, because a comma is the OR operator. |
 | 4 | A 401 shows the same message as a network failure | Nothing points the user at the settings screen to fix the token. |
 
 

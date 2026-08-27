@@ -1,7 +1,8 @@
 # Clients
 
-This page covers the command line client, the macOS hotkey and the MCP server.
-The web app needs no setup: open the server address in a browser.
+This page covers the command line client, the macOS hotkey, the Android app and
+the MCP server. The web app needs no setup: open the server address in a
+browser.
 
 Every example uses the default address `http://127.0.0.1:8637`.
 
@@ -179,6 +180,37 @@ The short version with Apple Shortcuts: **Ask for Input**, then **Run Shell
 Script** with `/usr/local/bin/teha add "$1"` and input passed as arguments,
 then **Add Keyboard Shortcut** in the shortcut details. A shell script from
 Shortcuts starts with a short `PATH`, so give the binary an absolute path.
+
+## The Android app
+
+The app ships through Obtainium, and
+[../android/README.md](../android/README.md) holds the install steps, the build
+steps and the list of open defects. Point it at a server once: open Settings,
+write the address, for example `https://teha.example`, write the device token,
+then touch **Test connection** and **Save**.
+
+The phone reads the same filter language as this page describes. The menu button
+in the top bar, or a swipe from the left edge, opens the list of views:
+
+| Row | Query |
+|---|---|
+| Today | `today` |
+| Overdue | `overdue` |
+| Next 7 days | `week` |
+| Inbox | `#inbox` |
+| No date | `no date` |
+| Priority 1 | `p1` |
+| All open | an empty query |
+| One row per project | `#Name` |
+
+The field above that list takes any query, and it shows what the compiler says
+about a query it refuses. The phone calls the Go compiler through the gomobile
+binding, so it reads every term the server reads. It compiles against the local
+column names, which are not the server's. See D-009 in
+[DECISIONS.md](DECISIONS.md).
+
+The one term the phone refuses is `created:`. The local database keeps no
+creation date, so the message says so instead of answering with the wrong rows.
 
 ## The MCP server, in Claude Code
 

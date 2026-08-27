@@ -3,7 +3,7 @@
 *2026-08-25. Built against [PLAN.md](PLAN.md) milestones M1 to M3, plus the
 Todoist importer, a command line client and the deployment files.*
 
-Tests: 73 Go cases and 29 parser cases pass. `go vet` and `gofmt` are clean.
+Tests: 96 Go cases and 29 parser cases pass. `go vet` and `gofmt` are clean.
 
 The plan makes four risky promises. This build tests each one with running code,
 not with a design note.
@@ -46,8 +46,9 @@ Tested:
 ## 3. A filter language that means one thing everywhere
 
 One grammar compiles to a SQL `WHERE` clause on the server, and the same grammar
-runs over the local rows in the browser. A saved view, a hand-typed query and an
-MCP call use the same string.
+runs over the local rows in the browser. The phone compiles it as well, through
+the gomobile binding, with the names of its own Room database. A saved view, a
+hand-typed query and an MCP call use the same string.
 
 ```
 today                       overdue | today & #Home
@@ -55,9 +56,10 @@ today                       overdue | today & #Home
 search: ferry               before: friday & deadline
 ```
 
-Twenty-one grammar cases and five rejection cases are under test. Todoist moved
-filters from `@label` to `%label`, so both work here and an imported filter
-keeps working.
+Twenty-one grammar cases and five rejection cases are under test. The phone
+dialect adds 49 cases, each one run against a real SQLite database that carries
+the Room column names. Todoist moved filters from `@label` to `%label`, so both
+work here and an imported filter keeps working.
 
 Speed, on 10 011 tasks, for a page of 200 rows:
 
@@ -156,13 +158,12 @@ The Go parser and the web parser both run the corpus in
 
 ## What this build does not have
 
-*Updated 2026-08-26. The Android app now ships, and the server runs behind the
-public entry point.*
+*Updated 2026-08-27. The Android app now ships, it reaches the views of the
+browser, and the server runs behind the public entry point.*
 
-- No macOS app and no widget. The Android app has a quick settings tile, and it
-  covers two views only: Today and All open. The browser has six built-in views
-  plus one per project, so the phone cannot reach a project list at all. This is
-  the largest gap that remains between the two clients.
+- No macOS app and no widget. The Android app has a quick settings tile, the six
+  built-in views of the browser, one view per project, and a field that takes any
+  query the filter grammar knows. It has no notification and no background sync.
 - No sharing, no second account, no push, no comments, no attachments.
 - No passkeys. One device token guards everything, and the browser keeps it in
   a cookie.
@@ -196,20 +197,22 @@ public entry point.*
 
 ## Next, in order
 
-*Updated 2026-08-26. The earlier list is done: the real import ran, the server
+*Updated 2026-08-27. The earlier list is done: the real import ran, the server
 runs at a public address with Litestream replicating, and the Android app ships
 through Obtainium with a signed release. Since then the phone gained a task
-detail screen, and both clients gained multi-select with five bulk actions.*
+detail screen, both clients gained multi-select with five bulk actions, and the
+phone gained the views. The filter compiler now emits either dialect, so the
+phone runs the same grammar over its own database.*
 
-1. **Views on the phone.** The binding already exposes `CompileFilter`, so the
-   phone can run the same filter grammar as the server and the browser. It needs
-   a schema shim first: the compiled SQL names the server's columns, and Room
-   holds the same rows under different names.
-2. **Rehearse a restore** from the Litestream replica into an empty volume, and
+1. **Rehearse a restore** from the Litestream replica into an empty volume, and
    write down the steps that worked.
-3. **Passkeys, then the second account.** The partner cannot use the app at all
+2. **Passkeys, then the second account.** The partner cannot use the app at all
    until an account exists that is not the owner's device token. This is what
    unlocks the household milestone.
-4. **Reminders and notifications.** Web Push with VAPID, per D-003.
-5. **Sections and a board layout.** The importer folds a Todoist section name
+3. **Reminders and notifications.** Web Push with VAPID, per D-003.
+4. **Sections and a board layout.** The importer folds a Todoist section name
    into the description today, because there is no section table.
+5. **One filter evaluator in the browser.** The browser reads a subset of the
+   grammar in JavaScript, so an unusual term quietly shows the wrong rows. The
+   phone has no such gap, because it calls the shared compiler. WebAssembly, or
+   a `POST /v1/query`, closes it.

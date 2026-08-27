@@ -22,15 +22,15 @@ import (
 	"time"
 )
 
-// Compile turns a query into a SQL fragment plus its arguments, in the naming
+// Compile turns a query into a SQL fragment plus its arguments, with the names
 // of the server database.
 // today fixes the meaning of relative words, so a test is stable.
 func Compile(query string, today time.Time) (string, []any, error) {
 	return CompileFor(query, today, ServerSchema)
 }
 
-// CompileFor turns a query into a SQL fragment plus its arguments, in the
-// naming that s gives.
+// CompileFor turns a query into a SQL fragment plus its arguments, with the
+// names that s gives.
 //
 // One parser, two dialects. A client whose local store names the same rows
 // differently passes its own Schema, so one filter string means one thing in
