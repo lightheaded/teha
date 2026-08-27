@@ -1,17 +1,20 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 name: desktop
 
-# A change to the server must not pay for a Rust build, so the paths list names
-# the desktop tree and this file, and nothing else. The shell holds no server
-# code: it points a window at a running server.
+# A change to the server must not pay for a Rust build, so the paths list is
+# short. It names the desktop tree, this file, and app.js of the web app: the
+# quick add of the shell drives the field in that file, and the contract test
+# below is what says so.
 on:
   push:
     paths:
       - 'desktop/**'
+      - 'internal/webui/assets/app.js'
       - '.github/workflows/desktop.yml'
   pull_request:
     paths:
       - 'desktop/**'
+      - 'internal/webui/assets/app.js'
       - '.github/workflows/desktop.yml'
 
 permissions:
@@ -47,6 +50,13 @@ jobs:
             desktop/src-tauri/target
           key: desktop-${{ runner.os }}-${{ hashFiles('desktop/src-tauri/Cargo.toml') }}
           restore-keys: desktop-${{ runner.os }}-
+
+      - name: Check the contract with the web app
+        # This one needs no Rust. The quick add path rests on the field of the
+        # web app keeping its id and clearing itself, so app.js is in the paths
+        # list above as well.
+        working-directory: ${{ github.workspace }}
+        run: node --test desktop/tools/contract.test.mjs
 
       - name: Check the formatting
         run: cargo fmt --all --check

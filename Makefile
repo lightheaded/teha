@@ -47,6 +47,7 @@ GUARD_TAURI = cargo tauri --version >/dev/null 2>&1 || { echo "the Tauri command
 
 # The cheap one. This is what CI runs, and it needs no bundle and no icon.
 desktop-check:
+	node --test desktop/tools/contract.test.mjs
 	@$(GUARD_RUST)
 	@$(GUARD_CC)
 	cd $(DESKTOP) && cargo check

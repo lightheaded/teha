@@ -60,7 +60,9 @@ pub fn settings_write(
     shortcut: String,
 ) -> Result<(), String> {
     let server = settings::normalise_server(&server)?;
-    let shortcut = settings::normalise_shortcut(&shortcut);
+    // A local name that is not "shortcut", so that the module of the same name
+    // stays readable two lines down.
+    let accelerator = settings::normalise_shortcut(&shortcut);
 
     // An empty token field keeps the token that the keychain holds. A person
     // who corrects the address alone must not have to find the token again.
@@ -72,11 +74,11 @@ pub fn settings_write(
     }
 
     let saved = Settings {
-        server: server.clone(),
-        shortcut: shortcut.clone(),
+        server,
+        shortcut: accelerator.clone(),
     };
     settings::store(&app, &saved)?;
-    shortcut::register(&app, &shortcut);
+    shortcut::register(&app, &accelerator);
 
     // The old window holds the old address and the old cookie, so it goes.
     web::forget(&app);

@@ -26,9 +26,10 @@ because the certificate carries a legal name. See `docs/PLAN.md` section 4.
 | Xcode command line tools | The linker and WebKit | `xcode-select --install` |
 | Tauri command line tool 2.11.4 | Builds the `.app` and the `.dmg` | `cargo install tauri-cli --version 2.11.4 --locked` |
 | Python 3 | Only to redraw the icons | Already on macOS |
+| Node | Only for the contract test | The repository already needs it for `make test` |
 
-Nothing here needs Node, npm or a bundler. The two pages of the shell are
-plain HTML, CSS and JavaScript, and the web app comes from the server.
+There is no npm and no bundler. The two pages of the shell are plain HTML, CSS
+and JavaScript, and the web app comes from the server.
 
 ## Build
 
@@ -144,7 +145,15 @@ Two scripts, both from Rust into the page, and nothing in the other direction.
    raises an `input` event and an `Enter` key event, and waits for the field to
    clear. That is the whole contract with the web app: **the quick add field
    has the id `qa`, and it clears itself after it adds a task.** A change to
-   that field in `internal/webui/assets` breaks quick add here.
+   that field in `internal/webui/assets` breaks quick add here, so a test holds
+   the contract and needs no Rust to run:
+
+   ```sh
+   node --test desktop/tools/contract.test.mjs
+   ```
+
+   `make desktop-check` runs it first, and so does CI. It reads `app.js` as
+   well, so a rename of the field fails the build rather than the shortcut.
 
 The page from the server is a remote origin. **No capability names it**, so it
 reaches no command of this shell at all. `capabilities/local.json` names the
@@ -176,7 +185,9 @@ desktop/
       policy.rs            the macOS Dock behaviour
       commands.rs          the four commands the local pages call
       js/                  the two scripts that go into the page
-  tools/make-icons.py      draws the icons from the web app shape
+  tools/
+    make-icons.py          draws the icons from the web app shape
+    contract.test.mjs      holds the DOM contract with the web app
 ```
 
 ## Versions

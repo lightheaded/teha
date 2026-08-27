@@ -6,9 +6,12 @@
 // This script runs before every page of the server loads. It acts on the login
 // page only, and it posts the token the way the login form does.
 //
-// The Rust side replaces __TEHA_TOKEN__ with a JSON string literal. The token
-// stays inside this function, so no script of the page can read it, and it
-// never reaches the DOM, a log line or the settings file.
+// The Rust side replaces the placeholder below with a JSON string literal. It
+// appears once, in the code, because a mention of it anywhere else in this file
+// would be replaced as well, and a token has no business in a comment.
+//
+// The token stays inside this function, so no script of the page can read it,
+// and it never reaches the DOM, a log line or the settings file.
 
 (function () {
   'use strict';

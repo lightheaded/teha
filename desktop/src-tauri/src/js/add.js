@@ -7,9 +7,12 @@
 // from a teha:// URL travels the same path as a task a person types, and the
 // two can never disagree about a date.
 //
-// The Rust side replaces __TEHA_LINE__ with a JSON string literal, so the line
-// arrives as data. This file is the whole contract with the web app: the field
-// has the id "qa", and it clears itself after it adds a task.
+// The Rust side replaces the placeholder below with a JSON string literal, so
+// the line arrives as data. It appears once, in the code, because a mention of
+// it anywhere else in this file would be replaced as well.
+//
+// This file is the whole contract with the web app: the quick add field has the
+// id "qa", and it clears itself after it adds a task.
 
 (function () {
   'use strict';
