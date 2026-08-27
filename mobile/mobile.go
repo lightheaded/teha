@@ -92,18 +92,44 @@ func ParseQuickAdd(text, todayISO string) string {
 	return string(b)
 }
 
-// CompileFilter turns a filter query into a SQL WHERE clause and its arguments.
+// CompileFilter turns a filter query into a SQL WHERE clause and its
+// arguments, in the naming of the server database.
 //
-//	{"sql":"t.due <= ? AND t.done = 0","args":["2026-08-25"]}
+//	{"sql":"(due_date IS NOT NULL AND due_date <= ?) AND state = 'open'",
+//	 "args":["2026-08-25"]}
 //
 // A query the grammar rejects returns {"error":"..."} instead. Show that text
 // to the user: it names the position that failed.
+//
+// A client that reads its own Room database calls CompileFilterRoom instead.
 func CompileFilter(query, todayISO string) string {
+	return compile(query, todayISO, filter.ServerSchema)
+}
+
+// CompileFilterRoom compiles a filter against the Android database.
+//
+// Room holds the same rows as the server under different names: the table
+// `tasks` rather than `task`, camelCase columns, and every label name of a task
+// in one comma-joined column rather than in a join table. The compiler takes
+// the names as a value and emits either dialect, so one filter string means one
+// thing on the phone, in the browser and on the server. See filter.Schema for
+// the mapping and for the reason it is not a rewrite of the finished SQL.
+//
+// The answer has the same shape as CompileFilter. The clause is a WHERE clause
+// only, so the caller adds the test for a deleted row and the sort of the view.
+//
+//	{"sql":"(dueDate IS NOT NULL AND dueDate <= ?) AND state = 'open'",
+//	 "args":["2026-08-25"]}
+func CompileFilterRoom(query, todayISO string) string {
+	return compile(query, todayISO, filter.RoomSchema)
+}
+
+func compile(query, todayISO string, schema filter.Schema) string {
 	t, ok := day(todayISO)
 	if !ok {
 		return errJSON("todayISO must be an ISO day, for example 2026-08-25")
 	}
-	sql, args, err := filter.Compile(query, t)
+	sql, args, err := filter.CompileFor(query, t, schema)
 	if err != nil {
 		return errJSON(err.Error())
 	}
