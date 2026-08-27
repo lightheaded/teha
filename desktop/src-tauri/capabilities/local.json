@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "local-pages",
+  "description": "The two pages that this shell serves itself: the quick add panel and the settings window. The window hosting the web app of the server is NOT listed, and no capability names a remote URL, so the page from the server reaches no command at all. The shell drives that page with eval from Rust instead. The global shortcut, the tray icon, the deep link and the single instance plugins are also absent from this list on purpose: this shell calls them from Rust only, and a permission entry grants a page the right to call a plugin from JavaScript.",
+  "windows": ["quickadd", "settings"],
+  "permissions": ["core:default"]
+}

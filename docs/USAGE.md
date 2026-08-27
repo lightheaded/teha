@@ -893,6 +893,38 @@ The inbox comes first. The other projects follow in alphabetical order.
 A shell script from Shortcuts starts with a short `PATH`. Give the binary an
 absolute path, for example `/usr/local/bin/teha`.
 
+**The desktop app is the shorter road.** `desktop/` holds a Tauri shell around
+the same web app, with a quick add panel of its own:
+
+| Where | What it does |
+|---|---|
+| `CmdOrCtrl+Shift+A` | Opens a quick add panel over every application |
+| `Enter` in the panel | Adds the task and closes the panel |
+| `Escape` in the panel | Closes the panel and adds nothing |
+| The menu bar icon | Quick add, open the app, settings, quit |
+
+The panel takes the same line as `teha add`, and it gives the keyboard back to
+the application you came from. The shortcut is in **Settings** in the menu bar
+menu. The device token lives in the keychain, and the server address in a file
+with mode 600. See [DECISIONS.md](DECISIONS.md) D-015.
+
+The app also answers a URL, which is what a launcher wants:
+
+```sh
+open "teha://add?text=Book%20the%20ferry%20tomorrow%20at%209:30%20p1%20%23Trip"
+```
+
+One URL adds one task, with no window on the screen. Percent encoding and `+`
+for a space both work. In Apple Shortcuts use an **Open URLs** action instead
+of **Run Shell Script**, so no `PATH` is involved at all.
+
+The URL is an input from outside the app. Only the `add` action does anything,
+the text becomes one line of at most 500 characters, and the line reaches a text
+field and never a shell. An unknown action writes one line and changes nothing.
+
+Build it with `make desktop`. [../desktop/README.md](../desktop/README.md) lists
+what you need installed. The build is unsigned in Phase 1.
+
 ### Messages and their causes
 
 | Message | Cause |
@@ -1120,14 +1152,19 @@ account file and import again from Todoist.
 This build is a proof of concept. The list below comes from
 [POC.md](POC.md).
 
-**No macOS app and no widget.** The web app and the command line client cover
-the desktop. The Android app ships through Obtainium, and
-[android/README.md](../android/README.md) holds the install steps and the list
-of open defects. The phone app captures with the Quick Settings tile, edits every
-field of a task, acts on a picked set of tasks, and reaches the six views of the
-browser, one view per project and any filter you type. It has no notification and
-no background sync. A phone that subscribes in its browser receives the server's
-push in the meantime.
+**No widget, and no signature on the macOS app.** The desktop shell ships: a
+global quick add panel, a menu bar icon and the `teha://` scheme, around the
+same web app. The build is unsigned, so a copy from another machine needs a
+right click and **Open** on the first run. The panel shows no parse hint before
+you press `Enter`, because the parser is in the page.
+
+**The phone app has gaps of its own.** The Android app ships through Obtainium,
+and [android/README.md](../android/README.md) holds the install steps and the
+list of open defects. The phone app captures with the Quick Settings tile, edits
+every field of a task, acts on a picked set of tasks, and reaches the six views
+of the browser, one view per project and any filter you type. It has no
+notification and no background sync. A phone that subscribes in its browser
+receives the server's push in the meantime.
 
 **One person only.** You cannot share a project. There is no second account,
 no assignee, no comment and no attachment. A reminder reaches a browser and an

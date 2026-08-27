@@ -593,3 +593,49 @@ because no column can answer it.
 **Reverses if:** a third store needs a shape that a naming scheme cannot
 describe, for example a labels column with a different separator. The answer then
 is a small emitter interface per store, not a string rewrite.
+
+---
+
+## D-015 — The desktop shell keeps the address in a file and the token in the keychain
+
+**Date:** 2026-08-27 · **Status:** done
+
+The macOS shell holds two settings. The server address and the quick add
+shortcut go into `settings.json` in the application configuration directory,
+with mode 600. The device token goes into the platform credential store, which
+is the keychain on macOS, under the service
+`io.github.lightheaded.teha.desktop` with the server address as the account.
+The token is never in a file, a log line, an environment variable or this
+repository.
+
+**Why.** The token is the whole account. The command line client reads
+`~/.config/teha/token` and guards it with a file mode, which is right for a
+tool that runs in a shell. A graphical application has a better place: the
+keychain locks with the login session, survives a backup as an encrypted item,
+and needs no rule about file modes. The address is not a secret, and a file
+keeps it readable and correctable by hand.
+
+Two settings and no more is the second half of the decision. The shell asks for
+the address and the token, and then asks the server for everything else,
+because the server already knows the projects, the labels and the views.
+
+**Cost.** One credential store entry per server address. A person who moves the
+server to a new address types the token again, which is the same cost the
+browser pays. The keychain prompt appears once per build, because an unsigned
+binary changes its identity on every rebuild, so macOS asks again.
+
+**Consequence.** The shell hands the token to the page of the web app by
+posting it to `/login`, the way the login form does, so the page holds the same
+cookie a browser would. The token stays inside a function of that script, so no
+script of the page can read it. When passkeys arrive, this path is the one that
+changes: the shell will hold no token at all.
+
+A second consequence shaped the rest of the shell. It holds **no quick add
+parser**. The panel sends its line to the quick add field of the web app, and
+that page parses it, stores it and syncs it. A parser in Rust would be a fourth
+implementation of the corpus in `parser-fixtures/`, and it would drift. The cost
+is a contract with the DOM of the web app: the field has the id `qa`, and it
+clears itself after it adds a task.
+
+**Reverses if:** passkeys replace the device token, which removes the secret
+this decision protects. The address stays in the file either way.

@@ -190,7 +190,10 @@ every time. That is what found bug 9.
 
 ## 6. Capture from the macOS keyboard, today
 
-The same binary is a client. That covers capture before the Tauri app exists.
+The same binary is a client. It covered capture before the Tauri shell
+existed, and it still covers a machine that has no shell installed. The
+desktop app in `desktop/` is the shorter road now: one keystroke, a panel, and
+`teha://add?text=` for a launcher.
 
 ```
 $ teha add "Book the ferry next tuesday at 9:30 p1 #Trip @call"
@@ -283,9 +286,15 @@ The full detail is in [DECISIONS.md](DECISIONS.md) D-010 and D-011.
 *Updated 2026-08-27. The Android app now ships, it reaches the views of the
 browser, and the server runs behind the public entry point.*
 
-- No macOS app and no widget. The Android app has a quick settings tile, the six
-  built-in views of the browser, one view per project, and a field that takes any
-  query the filter grammar knows. It has no notification and no background sync.
+- No widget, and no signature on the macOS app. The desktop shell now ships: it
+  hosts the web app, a global shortcut opens a quick add panel over every
+  application, a menu bar icon carries the menu, and `teha://add?text=` adds a
+  task from Shortcuts, Raycast or Keyboard Maestro. The build is unsigned, per
+  the Phase 4 decision about identity, and the panel shows no parse hint before
+  `Enter`, because the parser is in the page.
+- The Android app has a quick settings tile, the six built-in views of the
+  browser, one view per project, and a field that takes any query the filter
+  grammar knows. It has no notification and no background sync.
 - No sharing, no second account, no comments, no attachments.
 - Push works in the browser and in the installed web app, and nowhere else.
   The Android app fires its own local reminders from Room, which needs no
@@ -360,12 +369,15 @@ browser, and the server runs behind the public entry point.*
 
 ## Next, in order
 
-*Updated 2026-08-27. The earlier list is done: the real import ran, the server
+*Updated 2026-08-28. The earlier list is done: the real import ran, the server
 runs at a public address with Litestream replicating, and the Android app ships
 through Obtainium with a signed release. Since then the phone gained a task
-detail screen, both clients gained multi-select with five bulk actions, and the
-phone gained the views. The filter compiler now emits either dialect, so the
-phone runs the same grammar over its own database.*
+detail screen and the views, both clients gained multi-select with five bulk
+actions, the browser gained passkeys, reminders and a board of sections, and
+macOS gained the shell (M5). The filter compiler now emits either dialect, so
+the phone runs the same grammar over its own database. Capture from the keyboard
+no longer needs a launcher script, and `contrib/macos/` still works for a
+machine with no shell installed.*
 
 1. **Rehearse a restore** from the Litestream replica into an empty volume, and
    write down the steps that worked.

@@ -1,0 +1,74 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+name: desktop
+
+# A change to the server must not pay for a Rust build, so the paths list is
+# short. It names the desktop tree, this file, and app.js of the web app: the
+# quick add of the shell drives the field in that file, and the contract test
+# below is what says so.
+on:
+  push:
+    paths:
+      - 'desktop/**'
+      - 'internal/webui/assets/app.js'
+      - '.github/workflows/desktop.yml'
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - 'internal/webui/assets/app.js'
+      - '.github/workflows/desktop.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    # A macOS runner, because this shell talks to the keychain, the menu bar
+    # and the activation policy. A Linux check would compile a different set of
+    # dependencies and prove less.
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: desktop/src-tauri
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Cache the cargo output
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktop/src-tauri/target
+          key: desktop-${{ runner.os }}-${{ hashFiles('desktop/src-tauri/Cargo.toml') }}
+          restore-keys: desktop-${{ runner.os }}-
+
+      - name: Check the contract with the web app
+        # This one needs no Rust. The quick add path rests on the field of the
+        # web app keeping its id and clearing itself, so app.js is in the paths
+        # list above as well.
+        working-directory: ${{ github.workspace }}
+        run: node --test desktop/tools/contract.test.mjs
+
+      - name: Check the formatting
+        run: cargo fmt --all --check
+
+      - name: Check the shell
+        run: cargo check --all-targets
+
+      - name: Run the unit tests
+        # The URL parser and the JavaScript escaping carry the tests. Both are
+        # what an outside input touches first.
+        run: cargo test
+
+# There is no release job on purpose. The macOS build is unsigned in Phase 1,
+# and signing and notarization is a Phase 4 decision, because the certificate
+# carries a legal name. See docs/PLAN.md section 4.

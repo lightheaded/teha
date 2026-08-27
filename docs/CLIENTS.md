@@ -1,18 +1,14 @@
 # Clients
 
-This page covers the command line client, the macOS hotkey, the Android app and
-the MCP server. The web app needs no setup: open the server address in a
-browser.
+This page covers the command line client, the macOS hotkey, the macOS desktop
+app, the Android app and the MCP server. The web app needs no setup: open the
+server address in a browser.
 
 Every client on this page uses the device token. Passkeys are for the browser
 only: WebAuthn needs a browser and a person's gesture, so a shell and an agent
 cannot use one. The token is therefore not going away. Read
 [USAGE.md](USAGE.md#passkeys) for the browser side.
 
-||||||| 01c9321
-Notifications are a browser feature, so the web app carries them. Open settings
-with the gear in the header, or with the comma key. The command line client and
-the MCP server set no reminder yet, and the MCP tool list below says so.
 
 Every example uses the default address `http://127.0.0.1:8637`.
 
@@ -221,6 +217,56 @@ column names, which are not the server's. See D-014 in
 
 The one term the phone refuses is `created:`. The local database keeps no
 creation date, so the message says so instead of answering with the wrong rows.
+
+## The macOS desktop app
+
+`desktop/` holds a Tauri v2 shell around the same web app. It adds four things
+to a browser tab: a global quick add, a menu bar icon, the `teha://` URL scheme
+and one place for the server address. It holds no second copy of the web app
+and no second quick add parser.
+
+Build it from the root of the repository. `desktop/README.md` lists what you
+need installed, and `make desktop` says what is missing before it starts.
+
+```sh
+make desktop         # the .app and the .dmg, unsigned
+```
+
+Move `teha.app` into `/Applications` and open it once. The shell asks for the
+server address and the device token, then opens the app.
+
+- The address and the shortcut go into a JSON file with mode 600.
+- **The token goes into the keychain**, never into a file. See
+  [DECISIONS.md](DECISIONS.md) D-015.
+
+| Where | What it does |
+|---|---|
+| `CmdOrCtrl+Shift+A` | Opens the quick add panel over every application |
+| `Enter` in the panel | Adds the task and closes the panel |
+| `Escape` in the panel | Closes the panel and adds nothing |
+| The menu bar icon | Quick add, open the app, settings, quit |
+| **Settings** | Changes the address, the token and the shortcut |
+
+The panel takes the same line as `teha add`. It gives the keyboard back to the
+application you came from when it closes.
+
+### The `teha://` URL scheme
+
+```sh
+open "teha://add?text=Book%20the%20ferry%20tomorrow%20at%209:30%20p1%20%23Trip"
+```
+
+One task, with no window on the screen. Percent encoding and `+` for a space
+both work. Bind it in Apple Shortcuts with an **Open URLs** action, in Raycast
+or in Keyboard Maestro.
+
+The URL comes from outside the app, so the shell trusts nothing in it. Only the
+`add` action does anything, the text becomes one line of at most 500
+characters, and the line reaches a text field and never a shell. An unknown
+action writes one line and changes nothing.
+
+The scheme needs the bundled app. `make desktop-dev` runs the shell without a
+bundle, and macOS registers no scheme for it.
 
 ## The MCP server, in Claude Code
 
