@@ -95,11 +95,12 @@ type Label struct {
 
 // Section groups tasks inside a project.
 type Section struct {
-	ID         ID     `json:"id"`
-	Name       string `json:"name"`
-	ProjectID  ID     `json:"project_id"`
-	IsDeleted  Bool   `json:"is_deleted"`
-	IsArchived Bool   `json:"is_archived"`
+	ID           ID     `json:"id"`
+	Name         string `json:"name"`
+	ProjectID    ID     `json:"project_id"`
+	SectionOrder int    `json:"section_order"`
+	IsDeleted    Bool   `json:"is_deleted"`
+	IsArchived   Bool   `json:"is_archived"`
 }
 
 // Due is the due date of a task. Date is either "2006-01-02" or a timestamp.

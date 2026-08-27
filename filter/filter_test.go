@@ -31,6 +31,8 @@ func TestCompileShape(t *testing.T) {
 		{"#Home", []string{"project_id IN (SELECT id FROM project"}, []any{"Home"}},
 		{"#inbox", []string{"project_id = 'inbox'"}, nil},
 		{"##Home", []string{"WITH RECURSIVE tree"}, []any{"Home"}},
+		{"/Errands", []string{"section_id IN (SELECT id FROM section"}, []any{"Errands"}},
+		{"no section", []string{"section_id IS NULL"}, nil},
 		{"%store", []string{"task_label"}, []any{"store"}},
 		{"@store", []string{"task_label"}, []any{"store"}},
 		{"search: milk", []string{"lower(title) LIKE ?"}, []any{"%milk%", "%milk%"}},
@@ -150,5 +152,66 @@ func TestDoneQueryKeepsCompleted(t *testing.T) {
 	}
 	if strings.Contains(sql, "state = 'open'") {
 		t.Fatalf("a done query was narrowed to open tasks: %s", sql)
+	}
+}
+
+// A section name is data. It holds spaces, one name is the start of another,
+// and a name can hold the character that LIKE reads as a wildcard. All three
+// forms have to reach the database as text, and only a trailing * may widen
+// the match. These fixtures lock that.
+func TestSectionNames(t *testing.T) {
+	cases := []struct {
+		query   string
+		wantSQL string
+		notSQL  string
+		wantArg any
+	}{
+		// A name with a space. The lexer splits on the operators only, so the
+		// whole phrase is one term.
+		{"/Next actions", "lower(name) = lower(?)", "LIKE", "Next actions"},
+		// A name that is the start of another one. The exact form compares with
+		// =, so /Errand must never reach the section called Errands.
+		{"/Errand", "lower(name) = lower(?)", "LIKE", "Errand"},
+		// A trailing * is the one form that widens the match, exactly as
+		// #Project* does.
+		{"/Errand*", "lower(name) LIKE lower(?)", " = lower(?)", "Errand%"},
+		// A name that holds a wildcard character. The exact form compares with
+		// =, so the % is literal text and not a wildcard.
+		{"/50% done", "lower(name) = lower(?)", "LIKE", "50% done"},
+		// An underscore is the other LIKE wildcard, and it is literal here too.
+		{"/read_me", "lower(name) = lower(?)", "LIKE", "read_me"},
+	}
+	for _, c := range cases {
+		sql, args, err := Compile(c.query, today)
+		if err != nil {
+			t.Errorf("%q: %v", c.query, err)
+			continue
+		}
+		if !strings.Contains(sql, c.wantSQL) {
+			t.Errorf("%q compiled to %q, want %q inside", c.query, sql, c.wantSQL)
+		}
+		if strings.Contains(sql, c.notSQL) {
+			t.Errorf("%q compiled to %q, which must not contain %q", c.query, sql, c.notSQL)
+		}
+		if len(args) != 1 || args[0] != c.wantArg {
+			t.Errorf("%q gave args %v, want [%v]", c.query, args, c.wantArg)
+		}
+	}
+}
+
+// A section term narrows to open tasks like every other place term, and it
+// combines with the operators.
+func TestSectionCombines(t *testing.T) {
+	sql, args, err := Compile("#Home & /Errands & !no section", today)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"project", "section", " AND ", "NOT (", "state = 'open'"} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("%q is missing from %q", want, sql)
+		}
+	}
+	if len(args) != 2 || args[0] != "Home" || args[1] != "Errands" {
+		t.Errorf("args are %v, want [Home Errands]", args)
 	}
 }

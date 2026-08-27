@@ -69,6 +69,7 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("POST /v1/sync", s.guard(s.handleSync))
 	mux.HandleFunc("GET /v1/tasks", s.guard(s.handleTasks))
 	mux.HandleFunc("GET /v1/projects", s.guard(s.handleProjects))
+	mux.HandleFunc("GET /v1/sections", s.guard(s.handleSections))
 	mux.HandleFunc("GET /v1/labels", s.guard(s.handleLabels))
 	mux.HandleFunc("GET /v1/export", s.guard(s.handleExport))
 	mux.HandleFunc("GET /v1/events", s.guard(s.handleEvents))
@@ -176,6 +177,7 @@ type syncResponse struct {
 	Version  int64           `json:"version"`
 	Applied  []store.Result  `json:"applied"`
 	Projects []store.Project `json:"projects"`
+	Sections []store.Section `json:"sections"`
 	Labels   []store.Label   `json:"labels"`
 	Tasks    []store.Task    `json:"tasks"`
 	// Reminders travel with every other row. A reminder is account data, so a
@@ -217,8 +219,9 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, syncResponse{
 		Version: delta.Version, Applied: results,
-		Projects: orEmpty(delta.Projects), Labels: orEmpty(delta.Labels),
-		Tasks: orEmpty(delta.Tasks), Reminders: orEmpty(delta.Reminders),
+		Projects: orEmpty(delta.Projects), Sections: orEmpty(delta.Sections),
+		Labels: orEmpty(delta.Labels),
+		Tasks:  orEmpty(delta.Tasks), Reminders: orEmpty(delta.Reminders),
 	})
 }
 
@@ -261,6 +264,15 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"projects": ps})
+}
+
+func (s *Server) handleSections(w http.ResponseWriter, r *http.Request) {
+	secs, err := s.Store.Sections()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sections": secs})
 }
 
 func (s *Server) handleLabels(w http.ResponseWriter, r *http.Request) {

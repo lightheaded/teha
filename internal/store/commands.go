@@ -33,6 +33,7 @@ type TaskArgs struct {
 	ID           string   `json:"id"`
 	ProjectID    *string  `json:"project_id,omitempty"`
 	Project      *string  `json:"project,omitempty"` // by name, for MCP and import
+	SectionID    *string  `json:"section_id,omitempty"`
 	ParentID     *string  `json:"parent_id,omitempty"`
 	OrderKey     *string  `json:"order_key,omitempty"`
 	Title        *string  `json:"title,omitempty"`
@@ -58,6 +59,22 @@ type ProjectArgs struct {
 	Color    *string `json:"color,omitempty"`
 	ParentID *string `json:"parent_id,omitempty"`
 	OrderKey *string `json:"order_key,omitempty"`
+}
+
+// SectionArgs carries the fields of a section.
+type SectionArgs struct {
+	ID        string  `json:"id"`
+	ProjectID *string `json:"project_id,omitempty"`
+	Name      *string `json:"name,omitempty"`
+	OrderKey  *string `json:"order_key,omitempty"`
+}
+
+// MoveArgs moves one task. The section travels with the project, because a
+// section belongs to one project and the pair must agree after the move.
+type MoveArgs struct {
+	ID        string  `json:"id"`
+	ProjectID *string `json:"project_id,omitempty"`
+	SectionID *string `json:"section_id,omitempty"` // an empty string means no section
 }
 
 // LabelArgs carries the fields of a label.
@@ -215,6 +232,54 @@ func applyOne(tx *sql.Tx, c Command, now, today string) (string, error) {
 			return "", err
 		}
 		return a.ID, nil
+	case "task_move":
+		var a MoveArgs
+		if err := json.Unmarshal(c.Args, &a); err != nil {
+			return "", err
+		}
+		return a.ID, taskMove(tx, a, now)
+	case "section_add":
+		var a SectionArgs
+		if err := json.Unmarshal(c.Args, &a); err != nil {
+			return "", err
+		}
+		return sectionAdd(tx, a, now)
+	case "section_update":
+		var a SectionArgs
+		if err := json.Unmarshal(c.Args, &a); err != nil {
+			return "", err
+		}
+		return a.ID, sectionUpdate(tx, a, now)
+	case "section_move":
+		var a SectionArgs
+		if err := json.Unmarshal(c.Args, &a); err != nil {
+			return "", err
+		}
+		return a.ID, sectionMove(tx, a, now)
+	case "section_reorder":
+		var a SectionArgs
+		if err := json.Unmarshal(c.Args, &a); err != nil {
+			return "", err
+		}
+		if a.OrderKey == nil || *a.OrderKey == "" {
+			return "", fmt.Errorf("section_reorder needs an order_key")
+		}
+		return a.ID, rowSet(tx, "section", a.ID, now, map[string]any{"order_key": *a.OrderKey})
+	case "section_delete":
+		var a IDArgs
+		if err := json.Unmarshal(c.Args, &a); err != nil {
+			return "", err
+		}
+		return a.ID, sectionDelete(tx, a.ID, now)
+	case "section_restore":
+		// The undo of a section_delete. It brings the heading back, and the
+		// client then files the tasks with task_move: the server cleared their
+		// section and cannot know which tasks were in it.
+		var a IDArgs
+		if err := json.Unmarshal(c.Args, &a); err != nil {
+			return "", err
+		}
+		return a.ID, rowSet(tx, "section", a.ID, now, map[string]any{"deleted_at": nil})
 	case "label_add":
 		var a LabelArgs
 		if err := json.Unmarshal(c.Args, &a); err != nil {
@@ -262,15 +327,22 @@ func taskAdd(tx *sql.Tx, a TaskArgs, now string) (string, error) {
 	if a.Priority != nil {
 		prio = clampPriority(*a.Priority)
 	}
+	var section any
+	if a.SectionID != nil && *a.SectionID != "" {
+		if err := checkSection(tx, *a.SectionID, projectID); err != nil {
+			return "", err
+		}
+		section = *a.SectionID
+	}
 	v, err := bump(tx, "task", a.ID, "insert", now)
 	if err != nil {
 		return "", err
 	}
-	_, err = tx.Exec(`INSERT INTO task (id, project_id, parent_id, order_key, title, description,
+	_, err = tx.Exec(`INSERT INTO task (id, project_id, section_id, parent_id, order_key, title, description,
 		priority, due_date, due_time, due_tz, rrule, rrule_from_completion, start_date, deadline,
 		duration_min, state, source_ref, created_at, updated_at, version)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open',?,?,?,?)`,
-		a.ID, projectID, a.ParentID, order, strings.TrimSpace(*a.Title), str(a.Description),
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open',?,?,?,?)`,
+		a.ID, projectID, section, a.ParentID, order, strings.TrimSpace(*a.Title), str(a.Description),
 		prio, a.DueDate, a.DueTime, a.DueTz, a.RRule, boolInt(a.FromComplete), a.StartDate, a.Deadline,
 		a.DurationMin, a.SourceRef, now, now, v)
 	if err != nil {
@@ -337,7 +409,7 @@ func taskUpdate(tx *sql.Tx, a TaskArgs, now string) error {
 	}
 	for _, f := range a.Clear {
 		switch f {
-		case "due_date", "due_time", "due_tz", "rrule", "start_date", "deadline", "duration_min", "parent_id":
+		case "due_date", "due_time", "due_tz", "rrule", "start_date", "deadline", "duration_min", "parent_id", "section_id":
 			set[f] = nil
 		default:
 			return fmt.Errorf("field %q cannot be cleared", f)
@@ -531,6 +603,183 @@ func projectIDByName(tx *sql.Tx, name string) (string, error) {
 	default:
 		return "", fmt.Errorf("%q matches %s: use the full name", name, strings.Join(names, ", "))
 	}
+}
+
+// --- sections ---------------------------------------------------------------
+// A section is a heading inside one project, and a column on the board layout.
+// Every command here joins the change log through bump or rowSet, exactly as a
+// project command does, so a client pulls a section the same way it pulls a
+// project.
+
+func sectionAdd(tx *sql.Tx, a SectionArgs, now string) (string, error) {
+	if a.ID == "" || a.Name == nil || strings.TrimSpace(*a.Name) == "" {
+		return "", fmt.Errorf("section_add needs an id and a name")
+	}
+	project := InboxID
+	if a.ProjectID != nil && *a.ProjectID != "" {
+		project = *a.ProjectID
+	}
+	order := "m"
+	if a.OrderKey != nil {
+		order = *a.OrderKey
+	}
+	v, err := bump(tx, "section", a.ID, "insert", now)
+	if err != nil {
+		return "", err
+	}
+	_, err = tx.Exec(`INSERT INTO section (id, project_id, name, order_key,
+		created_at, updated_at, version) VALUES (?,?,?,?,?,?,?)`,
+		a.ID, project, strings.TrimSpace(*a.Name), order, now, now, v)
+	return a.ID, err
+}
+
+func sectionUpdate(tx *sql.Tx, a SectionArgs, now string) error {
+	set := map[string]any{}
+	if a.Name != nil {
+		if strings.TrimSpace(*a.Name) == "" {
+			return fmt.Errorf("a section needs a name")
+		}
+		set["name"] = strings.TrimSpace(*a.Name)
+	}
+	if a.OrderKey != nil {
+		set["order_key"] = *a.OrderKey
+	}
+	if len(set) == 0 {
+		return fmt.Errorf("section_update has nothing to change")
+	}
+	return rowSet(tx, "section", a.ID, now, set)
+}
+
+// sectionMove carries a section to another project, and takes its tasks along.
+//
+// The tasks have to travel. A section belongs to one project, so a task left
+// behind would name a section in a project it is not in, and no board could
+// draw it. Each task gets its own change_log row, so every client learns the
+// new project the same way it learns any other field.
+func sectionMove(tx *sql.Tx, a SectionArgs, now string) error {
+	if a.ProjectID == nil || *a.ProjectID == "" {
+		return fmt.Errorf("section_move needs a project_id")
+	}
+	var n int
+	if err := tx.QueryRow(`SELECT count(*) FROM project WHERE id = ? AND deleted_at IS NULL`,
+		*a.ProjectID).Scan(&n); err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("no project with id %q", *a.ProjectID)
+	}
+	set := map[string]any{"project_id": *a.ProjectID}
+	if a.OrderKey != nil {
+		set["order_key"] = *a.OrderKey
+	}
+	if err := rowSet(tx, "section", a.ID, now, set); err != nil {
+		return err
+	}
+	ids, err := tasksInSection(tx, a.ID)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := rowSet(tx, "task", id, now, map[string]any{"project_id": *a.ProjectID}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// sectionDelete removes a heading and keeps the work.
+//
+// Every task of the section stays in the project and loses its section, so it
+// appears in the column for tasks with no section. A section is a heading, and
+// the removal of a heading must never hide or delete work. The alternative, a
+// task that still points at a deleted section, is a row that the board cannot
+// draw and that no column lists.
+//
+// The delete is soft, like every other delete here, and each task carries its
+// own change_log row, so a client that pulls learns both changes.
+func sectionDelete(tx *sql.Tx, id, now string) error {
+	ids, err := tasksInSection(tx, id)
+	if err != nil {
+		return err
+	}
+	if err := rowSet(tx, "section", id, now, map[string]any{"deleted_at": now}); err != nil {
+		return err
+	}
+	for _, task := range ids {
+		if err := rowSet(tx, "task", task, now, map[string]any{"section_id": nil}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func tasksInSection(tx *sql.Tx, id string) ([]string, error) {
+	rows, err := tx.Query(`SELECT id FROM task WHERE section_id = ?`, id)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for rows.Next() {
+		var task string
+		if err := rows.Scan(&task); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		out = append(out, task)
+	}
+	err = rows.Err()
+	rows.Close() // the pool holds one connection, so free it before the writes
+	return out, err
+}
+
+// taskMove writes the project and the section of one task in one command.
+//
+// The two fields travel together on purpose. A board drag says "this task now
+// belongs here", and a client that sent two commands could land the section
+// before the project and leave the pair in disagreement for one round trip.
+func taskMove(tx *sql.Tx, a MoveArgs, now string) error {
+	if a.ProjectID == nil && a.SectionID == nil {
+		return fmt.Errorf("task_move needs a project_id or a section_id")
+	}
+	project := ""
+	if a.ProjectID != nil && *a.ProjectID != "" {
+		project = *a.ProjectID
+	} else {
+		err := tx.QueryRow(`SELECT project_id FROM task WHERE id = ?`, a.ID).Scan(&project)
+		if err == sql.ErrNoRows {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+	}
+	set := map[string]any{"project_id": project}
+	if a.SectionID != nil && *a.SectionID != "" {
+		if err := checkSection(tx, *a.SectionID, project); err != nil {
+			return err
+		}
+		set["section_id"] = *a.SectionID
+	} else {
+		set["section_id"] = nil
+	}
+	return rowSet(tx, "task", a.ID, now, set)
+}
+
+// checkSection refuses a section that is gone, and one that belongs to another
+// project. Without it a task could sit in a column of a project it is not in.
+func checkSection(tx *sql.Tx, sectionID, projectID string) error {
+	var owner string
+	err := tx.QueryRow(`SELECT project_id FROM section WHERE id = ? AND deleted_at IS NULL`, sectionID).Scan(&owner)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("no section with id %q", sectionID)
+	}
+	if err != nil {
+		return err
+	}
+	if owner != projectID {
+		return fmt.Errorf("section %q is in another project", sectionID)
+	}
+	return nil
 }
 
 // --- generic row helpers ----------------------------------------------------

@@ -112,7 +112,22 @@ for (const scheme of ['light', 'dark']) {
   await ctx.close();
 }
 
-// 6. Phone width. The Android app is now released, and the installed web app is
+// 6. The board layout, with the sections of a project as columns.
+//
+// A project view, not a built-in view: the board needs a project, because a
+// section belongs to one. The keyboard opens it, because that is the path the
+// README and USAGE.md document.
+{
+  const { ctx, page } = await open(DESKTOP, 'light');
+  await page.click('#nav a[data-title="Trip to Setomaa"]');
+  await page.waitForSelector('#list .row');
+  await page.keyboard.press('b');
+  await page.waitForSelector('.board .col-body .row');
+  await shot(page, 'board');
+  await ctx.close();
+}
+
+// 7. Phone width. The Android app is now released, and the installed web app is
 // still what a desktop browser shows at that width, so the README must show
 // that it is not a squeezed desktop.
 {

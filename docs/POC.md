@@ -227,7 +227,10 @@ public entry point.*
 - No password fallback and no second factor beyond the passkey itself. The
   browser now signs in with a passkey, and the device token is the fallback and
   the credential every native client uses.
-- No sections, no board layout, no calendar layout.
+- No calendar layout. Sections and the board layout now ship: a project view
+  draws its sections as columns, and the importer writes a section row instead
+  of a line of the description. A task that an earlier import wrote still
+  carries that line, and a re-import does not clean it.
 - Litestream replicates the cluster database and reports a matching transaction
   id, but nobody has rehearsed a restore from those files.
 - The web app stores its state in `localStorage`, not in OPFS with SQLite. That
@@ -273,7 +276,7 @@ detail screen, and both clients gained multi-select with five bulk actions.*
    shell and MCP. The partner still cannot use the app, because one account and
    one user handle is all the server holds. Sharing, an invite that is not the
    owner's token, and a session row per account are the household milestone.
-4. **Sections and a board layout.** The importer folds a Todoist section name
-   into the description today, because there is no section table.
-5. **A reminder in quick add.** `remind me at 8` parses in no client yet. The
+4. **A reminder in quick add.** `remind me at 8` parses in no client yet. The
    reminder is set in the task detail sheet.
+5. **The calendar layout.** Sections and the board ship. A month and a week
+   view, with drag to reschedule, do not.
