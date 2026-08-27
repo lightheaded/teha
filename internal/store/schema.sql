@@ -90,7 +90,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS task_fts USING fts5(task_id UNINDEXED, title,
 -- which does nothing to a task table that already exists, so a new column on a
 -- live account needs an ALTER. Store.migrate owns that step, and it also owns
 -- the index on the new column. See internal/store/store.go and DECISIONS.md
--- D-009.
+-- D-012.
 CREATE TABLE IF NOT EXISTS section (
   id         TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES project(id),

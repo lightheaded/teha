@@ -300,7 +300,7 @@ then is paging over ids, not a query inside a command.
 
 ---
 
-## D-009 — A new column arrives through an ALTER in code, not through schema.sql
+## D-012 — A new column arrives through an ALTER in code, not through schema.sql
 
 **Date:** 2026-08-27 · **Status:** done
 

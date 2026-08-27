@@ -70,7 +70,7 @@ func Open(path string) (*Store, error) {
 // The data is safe. ADD COLUMN rewrites no row: SQLite records the new column
 // in the header and reads a missing value as the default, which is NULL here.
 // A task in an upgraded account is therefore in no section, which is what it
-// was before the column existed. See DECISIONS.md D-009.
+// was before the column existed. See DECISIONS.md D-012.
 func (s *Store) migrate() error {
 	steps := []struct{ table, column, ddl string }{
 		{"task", "section_id", `ALTER TABLE task ADD COLUMN section_id TEXT REFERENCES section(id)`},
