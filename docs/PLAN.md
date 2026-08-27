@@ -152,7 +152,7 @@ Phase 1 is solo daily driving with import from Todoist. Phase 2 makes it a house
 
 | Layer | Choice | Why |
 |---|---|---|
-| Server | Go, `modernc.org/sqlite` v1.57.0, `embed.FS` for the web build, MCP Go SDK v1.7.0, `rrule-go` v1.8.2, `go-webauthn` v0.17.4 | Single static binary, 15 to 40 MB idle, one 25 MB image. Go is already in use in a sibling project. The MCP SDK is official. Versions read 2026-08-25. |
+| Server | Go, `modernc.org/sqlite` v1.57.0, `embed.FS` for the web build, MCP Go SDK v1.7.0, `rrule-go` v1.8.2, `go-webauthn` v0.18.0 | Single static binary, 15 to 40 MB idle, one 25 MB image. Go is already in use in a sibling project. The MCP SDK is official. Versions read 2026-08-25. |
 | Database | SQLite in WAL mode, one file per account in Phase 4, Litestream v0.5.16 to S3-compatible storage | Small, fast, backed up with one process. Multi-tenant later without Postgres. The 0.5 line shipped 2025-09-30 and rebuilt replication on the LTX format. |
 | Web | Svelte 5.56, SvelteKit 2.70, Vite, TypeScript, wa-sqlite in OPFS with an IndexedDB fallback, virtual lists | Small bundle, fast, compiles away. |
 | Android | Kotlin, Jetpack Compose, Room 2.8.4, WorkManager, Ktor, Glance 1.1.1 | Same shape as lugu. Room is KMP-stable since 2.7.0, so an iOS core later is cheap. Glance 1.2 is still a release candidate, so plan on 1.1.1. |
