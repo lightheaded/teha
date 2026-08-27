@@ -72,6 +72,11 @@ Open <http://127.0.0.1:8637>.
 | `-dev` | — | off | No token, debug logs. |
 | `-seed` | — | off | Write example data and exit. |
 | `-version` | — | — | Print `teha 0.1.0 (proof of concept)` and exit. |
+| `-vapid-keys` | — | off | Make a Web Push keypair, print it and exit. |
+| `-vapid-public` | `TEHA_VAPID_PUBLIC_KEY` | empty | The Web Push public key. |
+| — | `TEHA_VAPID_PRIVATE_KEY` | empty | The Web Push private key. A secret, so it has no flag. |
+| `-vapid-subject` | `TEHA_VAPID_SUBJECT` | a repository URL | A `mailto:` address or an `https:` URL for the push service. |
+| `-push-interval` | — | `30s` | How often the reminder scheduler looks for due reminders. |
 
 The flag wins over the environment variable.
 
@@ -144,6 +149,10 @@ the screen, a log line or an error message.
 | `/v1/labels` | GET | Every label. |
 | `/v1/export` | GET | The whole account as one JSON file. |
 | `/v1/events` | GET | Server-sent events. One `version` event per write, and a ping every 25 seconds. |
+| `/v1/push/key` | GET | `{"enabled":true,"key":"...","devices":1}`. The browser subscribes with the key. |
+| `/v1/push/subscribe` | POST | The browser posts its own subscription, unchanged. |
+| `/v1/push/unsubscribe` | POST | `{"endpoint":"..."}`. The row goes. |
+| `/v1/push/test` | POST | Send one notification to every subscribed device. |
 | `/v1/health` | GET | `{"ok":true,"version":18}`. No token. |
 | `/mcp` | POST | The MCP endpoint. |
 | `/login` | GET, POST | The token form. |
@@ -257,6 +266,11 @@ date, deadline, priority, project, labels and the repeat rule. The labels field
 takes a comma separated list, for example `store, call`. The repeat field takes
 a raw RRULE string, for example `FREQ=WEEKLY;BYDAY=MO`.
 
+**Remind** arms one notification for the task: at the due time, or 10 minutes,
+30 minutes, an hour or a day before it. The row needs a due date, and a task
+with a date but no time counts as 09:00. A change of the due date or the due
+time moves the reminder with it.
+
 To add a sub-task, type a title in the last field and press Enter.
 
 **Delete** removes the task. **Escape** closes the sheet. Each field saves when
@@ -283,6 +297,7 @@ it loses focus. The sheet never waits for the server.
 | `u` | Undo the last completion or deletion. |
 | `r` | Sync now. |
 | `g` | Go to Today. |
+| `,` | Open settings and the notification controls. |
 | `?` | Show the key list. |
 | Escape | Drop the selection, close the sheet, or leave the quick add box. |
 
@@ -308,6 +323,45 @@ The service worker caches `/`, `/app.js`, `/parse.js`,
 | The first load in a new browser | Needs the server one time |
 | The login | Needs the server |
 | An unusual filter term | See the next table |
+
+### Notifications
+
+The server sends a reminder to this browser with Web Push. The browser must
+subscribe once, and the operator must set a VAPID keypair on the server. Read
+[DEPLOY.md](DEPLOY.md) for the server side.
+
+To turn notifications on:
+
+1. Press the gear in the header, or press `,`.
+2. Press **Turn on notifications**. The browser asks for permission at that
+   moment.
+3. Press **Send a test**. A notification on the screen is the proof.
+
+The panel says the state of this device in one sentence. If the browser blocked
+notifications, allow them in the browser site settings and open the panel
+again. A blocked site cannot ask a second time on its own.
+
+Each device subscribes on its own: every browser, and the installed web app on
+every phone. **Turn off** removes this device and nothing else.
+
+**Daily digest** arms one notification each morning with what is due that day.
+Set a time and press **Turn on**. The digest is an account setting, so it
+arrives on every subscribed device.
+
+A click on a notification opens the task. If the app is already open, the
+window comes to the front and the detail sheet opens.
+
+Two rules are worth knowing:
+
+- **A reminder arrives once, or not at all.** The server marks it sent before
+  it sends, so a restart never sends it twice. A crash at the wrong moment
+  loses the notification, and the task stays overdue in Today.
+- **A reminder that came due while the server was down arrives late only inside
+  a window**: one hour for a task reminder, four hours for a digest. After
+  that the server drops it. A notification about 09:00 is noise at 16:00, and
+  the overdue task says the same thing better.
+
+[DECISIONS.md](DECISIONS.md) D-009 and D-010 hold the reasons.
 
 ### The browser filter is a subset
 
@@ -945,10 +999,15 @@ the desktop. The Android app ships through Obtainium, and
 [android/README.md](../android/README.md) holds the install steps and the list
 of open defects. The phone app shows Today and All open, captures with the Quick
 Settings tile, edits every field of a task, and acts on a picked set of tasks.
-It has no project view, no filter field and no notifications yet.
+It has no project view and no filter field yet. It also fires no reminder of its
+own: the plan gives the phone a local alarm from its own database, and that work
+is open. A phone that subscribes in its browser receives the server's push in
+the meantime.
 
 **One person only.** You cannot share a project. There is no second account,
-no assignee, no push notification, no comment and no attachment.
+no assignee, no comment and no attachment. A reminder reaches a browser and an
+installed web app. A comment or an assignment sends nothing, because there is
+nobody else to send to.
 
 **One token, no passkeys.** One device token guards everything. The browser
 keeps it in a cookie. A leaked token needs a new `TEHA_TOKEN` and a restart,
@@ -974,7 +1033,8 @@ Nothing else uses them.
 
 Next, in order: give the phone the project and filter views it still lacks,
 rehearse a restore from the Litestream replica, then add passkeys and a second
-account.
+account. [BACKLOG.md](BACKLOG.md) holds every knowingly unfinished thing with
+its reason.
 
 The real Todoist import already ran, on 2026-08-25: 17 projects, 250 tasks, 63
 labels, 0 failed commands, one HTTP request, 34 milliseconds. It also found

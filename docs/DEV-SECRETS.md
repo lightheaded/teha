@@ -32,6 +32,8 @@ The repository holds none of these files.
 | `keystore_password` | The Android release keystore password. It is also the key password. |
 | `keystore_alias` | `teha`. Not a secret, kept here so no command has to guess. |
 | `keystore_jks_base64` | The Android release keystore itself, base64 encoded. |
+| `vapid_private_key` | The Web Push private key. Whoever holds it can push to every subscribed device. |
+| `vapid_public_key` | The Web Push public key. Not a secret, kept here so the pair stays together. |
 
 ## Read a secret
 
@@ -45,6 +47,26 @@ teha import --token "$(scripts/secret todoist_token)"
 Never pass a secret as a command argument on a shared machine. An argument is
 visible in the process list to every other process. Prefer an environment
 variable or a pipe.
+
+To run the server with notifications, read both keys into the environment:
+
+```sh
+export TEHA_VAPID_PUBLIC_KEY="$(scripts/secret vapid_public_key)"
+export TEHA_VAPID_PRIVATE_KEY="$(scripts/secret vapid_private_key)"
+go run ./cmd/teha -dev
+```
+
+`teha -vapid-keys` makes a new pair and prints both keys. It writes nothing to
+disk, so put the private key into the store at once:
+
+```sh
+sops ~/.config/teha/secrets.enc.yaml     # add vapid_private_key
+```
+
+A new pair invalidates every subscription, and each browser must then subscribe
+again. So make the pair once and keep it. The private key must never reach this
+repository, a container image, a log line or a shell history file, and it must
+never be passed as a command argument.
 
 To get the keystore back as a real file, for example to check a signature:
 
@@ -152,7 +174,7 @@ umask 077 && scripts/secret device_token > ~/.config/teha/token
 
 ## The cluster keeps its own copy
 
-The server in the cluster reads `TEHA_TOKEN` from
+The server in the cluster reads `TEHA_TOKEN` and both VAPID keys from
 `the encrypted store of the cluster` in the private repository, encrypted
 to the master age key of that store. Nothing on this page reaches a container image or a
 repository.

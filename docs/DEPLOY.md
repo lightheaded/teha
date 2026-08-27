@@ -21,9 +21,16 @@ filesystem stays read-only in the cluster example.
 | `TEHA_ADDR` | `127.0.0.1:8637` | The listen address. The image sets `0.0.0.0:8637`. |
 | `TEHA_DB` | `teha.db` | The path to the SQLite file. The image sets `/data/teha.db`. |
 | `TEHA_TOKEN` | empty | The device token. An empty value makes the server print a new token at each start. |
+| `TEHA_MCP` | empty | `1` mounts the MCP endpoint at `/mcp`. Off by default. |
+| `TEHA_VAPID_PUBLIC_KEY` | empty | The VAPID public key. The browser subscribes with it. Not a secret. |
+| `TEHA_VAPID_PRIVATE_KEY` | empty | The VAPID private key. **A secret.** Push stays off without it. |
+| `TEHA_VAPID_SUBJECT` | a repository URL | A `mailto:` address or an `https:` URL. A push service can use it to reach you about a sender that misbehaves. |
 
-Each variable has a flag with the same function: `-addr`, `-db` and `-token`.
-The flag wins over the variable.
+Each variable has a flag with the same function: `-addr`, `-db`, `-token`,
+`-mcp`, `-vapid-public` and `-vapid-subject`. The flag wins over the variable.
+
+`TEHA_VAPID_PRIVATE_KEY` has **no flag**, on purpose. A command argument is
+visible in the process list to every other process on the machine.
 
 Two more flags help during development:
 
@@ -54,6 +61,56 @@ Keep the token in a secret store. If a token leaks, replace `TEHA_TOKEN` and
 restart the server. All clients then log in again.
 
 The token is empty in `-dev` mode. Every request is then allowed.
+
+## Send notifications
+
+The server sends a reminder to a browser and to an installed web app with the
+Web Push protocol. It needs one VAPID keypair, once, for the life of the
+deployment. A new keypair invalidates every subscription, and each device must
+then subscribe again.
+
+1. Make the keypair:
+
+   ```sh
+   teha -vapid-keys
+   ```
+
+   The command prints both keys and what to do with each. It writes nothing to
+   disk.
+
+2. Put the public key in the deployment, beside `TEHA_ADDR` and `TEHA_DB`:
+
+   ```sh
+   TEHA_VAPID_PUBLIC_KEY=<the public key>
+   TEHA_VAPID_SUBJECT=mailto:you@example.com
+   ```
+
+3. Put the private key in the secret store. In Compose that is the `.env` file
+   that `.gitignore` excludes. In the cluster it is the encrypted Secret.
+
+   ```sh
+   TEHA_VAPID_PRIVATE_KEY=<the private key>
+   ```
+
+   Never commit the private key, never put it in an image, and never pass it as
+   a command argument. Whoever holds it can push to every subscribed device.
+
+4. Restart the server and read the log. The line
+   `the reminder scheduler is on` says that both keys arrived. A server with
+   one key logs a warning and runs with push off.
+
+5. Open the web app, press the gear in the header, and press **Turn on
+   notifications**. The browser asks for permission at that press. Then press
+   **Send a test**. A notification on the screen is the proof.
+
+Every device subscribes once: each browser, and the installed web app on each
+phone. The Android app needs no subscription for a due time, because it fires a
+local reminder from its own database.
+
+The scheduler looks for due reminders every 30 seconds. `-push-interval`
+changes that. A reminder that came due while the server was down fires late
+only inside its window: one hour for a point reminder, four hours for a daily
+digest. See [DECISIONS.md](DECISIONS.md) D-009 and D-010.
 
 ## Run with Docker
 
@@ -105,6 +162,9 @@ Both services mount the same data volume.
 
    ```sh
    TEHA_TOKEN=replace-with-a-random-token
+   TEHA_VAPID_PUBLIC_KEY=replace-with-the-public-key
+   TEHA_VAPID_PRIVATE_KEY=replace-with-the-private-key
+   TEHA_VAPID_SUBJECT=mailto:you@example.com
    LITESTREAM_ACCESS_KEY_ID=replace-with-the-access-key
    LITESTREAM_SECRET_ACCESS_KEY=replace-with-the-secret-key
    LITESTREAM_ENDPOINT=https://s3.example.com

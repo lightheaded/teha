@@ -64,7 +64,7 @@ The fallback is a Kotlin and a Swift implementation, both verified against
 
 ## D-003 — Push is Web Push with VAPID, not Firebase only
 
-**Date:** 2026-08-25 · **Status:** decided, open until push exists
+**Date:** 2026-08-25 · **Status:** done 2026-08-27. Web Push runs
 
 The server speaks the Web Push protocol with VAPID keys. Firebase Cloud
 Messaging is not the only transport.
@@ -82,6 +82,11 @@ a single vendor token.
 **Reverses if:** the Android app needs a delivery guarantee that only Firebase
 provides. Then Firebase becomes a second transport beside Web Push, not a
 replacement.
+
+**Built 2026-08-27.** `internal/push` sends with `webpush-go` v1.4.0. The
+scheduler, the once-only rule and the missed-window rule are D-009 and D-010.
+The Android app still fires its own local reminders from Room, per PLAN.md §4,
+so a phone needs no subscription for a due time it already knows.
 
 ---
 
@@ -297,3 +302,105 @@ one request, one transaction, and a row nobody named does not move.
 
 **Reverses if:** a batch ever grows past what one request can hold. The answer
 then is paging over ids, not a query inside a command.
+
+---
+
+## D-009 — A reminder is claimed before it is sent, so it fires at most once
+
+**Date:** 2026-08-27 · **Status:** done
+
+The scheduler marks a due reminder as sent inside the same SQLite transaction
+that reads it. The transaction commits. Only then does a push leave the
+process. The claim predicate is one line of SQL:
+
+```sql
+fire_at <= now AND (sent_at IS NULL OR sent_at < fire_at)
+```
+
+The claim sets `sent_at = now`, and `now` is at or after `fire_at`, so the
+predicate is false for that row for ever after. A daily digest also moves
+`fire_at` one day forward in the same transaction, so it becomes claimable
+again tomorrow and never twice for the same day. One rule covers both kinds,
+and no extra column is necessary.
+
+**Why at most once, and not at least once.** A crash between the commit and the
+send loses one notification. The alternative loses nothing and sends some
+notifications twice. That trade looks even and it is not. A duplicate reminder
+teaches the person that a notification means nothing, and the next real one gets
+swiped away without a read. A lost reminder costs much less, because the task is
+still in Today and still overdue. The list is the durable signal. The
+notification is only the nudge.
+
+**Why the claim is in the store and not in the scheduler.** The guarantee is a
+property of one transaction. Code that sits beside that SQL cannot break it by
+accident. `store.ClaimDue` is therefore the only writer of `sent_at`, and the
+sender receives rows that are already marked.
+
+**What a restart does.** Nothing. `TestClaimIsOnceOnlyAcrossARestart` claims a
+reminder, closes the database, opens the same file again and claims again. The
+second pass finds nothing. `TestOnceOnlyAcrossARestart` does the same through
+the whole sender against an `httptest` push service and counts one request.
+
+**What a Litestream restore does.** A restore to the latest point loses under a
+second of the write-ahead log, so a `sent_at` written a minute ago survives. A
+restore to a named earlier moment can rewind a sent marker and re-arm the
+reminder. Two things bound the damage:
+
+- The grace window in D-010 drops every reminder that came due more than an
+  hour ago, so a restore to yesterday sends nothing.
+- Each notification carries `tag: teha-<reminder id>`. A browser replaces a
+  notification of the same tag, so a second copy shows one line in the tray and
+  not two.
+
+A point-in-time restore of a task database is a rare, deliberate act. One
+duplicate nudge inside the last hour of it is an acceptable price.
+
+**Cost.** A push service that answers slowly, or a crash at the wrong moment,
+loses one notification with no trace. The reminder row shows `sent_at`, so the
+log says a notification was owed. It does not say whether a phone rang.
+
+**Reverses if:** delivery ever needs a receipt. The answer then is a delivery
+attempt table, one row per subscription and reminder, with a retry count. That
+is at-least-once with de-duplication in the client, and it costs a table, a
+retry policy and a de-duplication rule in every client. Nothing yet asks for it.
+
+---
+
+## D-010 — A missed reminder fires late inside one hour, and never after that
+
+**Date:** 2026-08-27 · **Status:** done
+
+The server was down when a reminder came due. On the next pass the reminder
+fires once, if it came due inside its grace window. Outside the window the
+scheduler marks it and sends nothing. The windows are one hour for a point
+reminder and four hours for a daily digest.
+
+**Why not "always fire late".** A reminder is a request to act at a moment. Six
+hours after that moment the moment is gone. The notification then arrives with
+no context, it names work the person already passed, and it trains the person
+to ignore the next one. A restart that lasts a week is worse: the phone rings
+forty times for reminders of last Tuesday.
+
+**Why not "always skip".** An upgrade takes two minutes. A pod restart takes
+ten seconds. A reminder swallowed by a two-minute deployment is a bug that
+nobody can see and everybody feels. Inside the window a late notification is
+exactly what the person wanted.
+
+**Why the two windows differ.** A kind changes how fast a notification rots.
+"Call the garage at 09:00" is worthless at 14:00. A digest of today is still
+worth a read at 11:00, because it names the whole day and the day is not over.
+So the digest gets four hours and a point reminder gets one.
+
+**A skipped reminder is not silent.** The task keeps its due date, so it sits at
+the top of Today in the overdue group, in every client. The reminder row keeps
+its `sent_at`, so the account shows that the notification was owed and dropped.
+Nothing disappears. Only the nudge does.
+
+**Cost.** One number that nobody can tune per reminder. A person who wants a
+notification for a reminder of three hours ago cannot get it. The task in Today
+is the answer for that case.
+
+**Reverses if:** a kind arrives whose value does not fall away with time, for
+example a reminder about a medicine at a fixed hour. The answer then is a grace
+window per kind in the table, and not one constant in the code. The shape is
+ready for it: `store.GraceWindow` takes the kind already.

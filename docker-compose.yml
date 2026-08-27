@@ -21,6 +21,12 @@ services:
       TEHA_DB: /data/teha.db
       # A missing token makes the server print a new one on each start.
       TEHA_TOKEN: ${TEHA_TOKEN:?set TEHA_TOKEN in .env}
+      # Web Push. All three are optional, and the server runs with push off
+      # without them. Keep the private key in .env, which .gitignore excludes.
+      # Make a pair with: teha -vapid-keys
+      TEHA_VAPID_PUBLIC_KEY: ${TEHA_VAPID_PUBLIC_KEY:-}
+      TEHA_VAPID_PRIVATE_KEY: ${TEHA_VAPID_PRIVATE_KEY:-}
+      TEHA_VAPID_SUBJECT: ${TEHA_VAPID_SUBJECT:-}
     ports:
       - "127.0.0.1:8637:8637"
     volumes:

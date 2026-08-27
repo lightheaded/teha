@@ -49,9 +49,10 @@ MCP server that an agent can drive for a whole session.
 
 ## Status
 
-Proof of concept. The server, the sync engine, the filter language, the web app
-and the MCP server run. The Android app, the macOS app, sharing and push do not
-exist yet. Read [docs/PLAN.md](docs/PLAN.md) for the phased plan and
+Proof of concept. The server, the sync engine, the filter language, the web app,
+the MCP server and the Android app run. Reminders reach the browser and the
+installed web app through Web Push. The macOS app, sharing and a second account
+do not exist yet. Read [docs/PLAN.md](docs/PLAN.md) for the phased plan and
 [docs/POC.md](docs/POC.md) for what this build proves and what it does not.
 
 ## Run it
