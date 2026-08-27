@@ -56,6 +56,9 @@ func main() {
 		token   = flag.String("token", os.Getenv("TEHA_TOKEN"), "device token. An empty token in --dev mode turns auth off")
 		dev     = flag.Bool("dev", false, "development mode: no auth, verbose logs")
 		mcpOn   = flag.Bool("mcp", envBool("TEHA_MCP"), "serve the MCP endpoint at /mcp. Off by default: an agent endpoint drives the account, not only reads it, so an operator turns it on deliberately")
+		rpID    = flag.String("rp-id", os.Getenv("TEHA_RP_ID"), "the WebAuthn relying-party id, a bare domain such as teha.example. Empty reads it from the request host")
+		rpOrig  = flag.String("origin", os.Getenv("TEHA_ORIGIN"), "the origin the web app is served from, such as https://teha.example. Empty builds it from the request host")
+		fwd     = flag.Bool("trust-forwarded", envBool("TEHA_TRUST_FORWARDED"), "read the client address from X-Forwarded-For. Turn it on only behind a proxy that writes that header, because a client that writes its own address escapes the passkey lockout")
 		seed    = flag.Bool("seed", false, "write example data into an empty database and exit")
 		seedDay = flag.String("seed-date", "", "the day that seeded dates count from, as 2006-01-02. Empty means today. Used by the screenshot job, so that an unchanged screen produces an identical image on any day")
 		version = flag.Bool("version", false, "print the version and exit")
@@ -114,6 +117,10 @@ func main() {
 	}
 
 	apiSrv := api.New(st, tok, log)
+	// The relying party comes from configuration, and from the request host
+	// when configuration says nothing. No hostname belongs in this binary.
+	apiSrv.RP = api.RelyingParty{ID: *rpID, Origin: *rpOrig, DisplayName: "teha"}
+	apiSrv.TrustForwarded = *fwd
 
 	mux := http.NewServeMux()
 	mux.Handle("/v1/", apiSrv.Routes())
@@ -131,7 +138,7 @@ func main() {
 		log.Info("the MCP endpoint is on", "path", "/mcp")
 	}
 	mux.HandleFunc("/login", loginHandler(tok))
-	mux.Handle("/", webHandler(tok))
+	mux.Handle("/", webHandler(apiSrv))
 
 	srv := &http.Server{
 		Addr:              *addr,
@@ -160,10 +167,13 @@ func main() {
 
 // webHandler serves the web app. An unauthenticated browser goes to the login
 // page instead of the app shell.
-func webHandler(token string) http.Handler {
+//
+// The API server answers the question, because there are now two ways in: the
+// device token in a cookie, and a passkey session.
+func webHandler(apiSrv *api.Server) http.Handler {
 	assets := webui.Handler()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" && token != "" && !hasCookie(r, token) {
+		if r.URL.Path == "/" && !apiSrv.Authenticated(r) {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
@@ -185,9 +195,13 @@ func loginHandler(token string) http.HandlerFunc {
 				return
 			}
 			if r.PostFormValue("token") == token {
+				// Secure follows the host, not r.TLS. The server usually sits
+				// behind a proxy that ends TLS, so r.TLS is nil on a request
+				// that reached the browser over https, and the old rule left
+				// the token cookie without the flag on every such deployment.
 				http.SetCookie(w, &http.Cookie{
 					Name: "teha_token", Value: token, Path: "/", HttpOnly: true,
-					SameSite: http.SameSiteLaxMode, Secure: r.TLS != nil,
+					SameSite: http.SameSiteLaxMode, Secure: api.SecureCookie(r),
 					Expires: time.Now().AddDate(1, 0, 0),
 				})
 				http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -222,11 +236,6 @@ func withBearer(token string, next http.Handler) http.Handler {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="teha"`)
 		http.Error(w, "a token is required", http.StatusUnauthorized)
 	})
-}
-
-func hasCookie(r *http.Request, token string) bool {
-	c, err := r.Cookie("teha_token")
-	return err == nil && c.Value == token
 }
 
 func logRequests(log *slog.Logger, next http.Handler) http.Handler {

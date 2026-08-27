@@ -25,16 +25,39 @@ type Server struct {
 	// Token guards every route. An empty token turns auth off, which is for
 	// local development only.
 	Token string
+	// RP names this deployment to an authenticator. An empty field is read
+	// from the request host, so no hostname is built into the binary.
+	RP RelyingParty
+	// TrustForwarded makes the lockout read the client address from
+	// X-Forwarded-For. Turn it on only when a proxy writes that header.
+	TrustForwarded bool
+	// SessionTTL is the lifetime of a passkey session. Zero means
+	// DefaultSessionTTL.
+	SessionTTL time.Duration
 	// Now returns the current time. Tests replace it.
 	Now func() time.Time
 
 	mu       sync.Mutex
 	watchers map[chan int64]struct{}
+
+	// sessMu guards the passkey state below. It is separate from mu, because
+	// the event fan-out and a login must not wait for each other.
+	sessMu       sync.Mutex
+	sessions     map[string]webSession
+	ceremonies   map[string]ceremony
+	failures     map[string]*failCount
+	accountFails failCount
 }
 
 // New builds a server.
 func New(s *store.Store, token string, log *slog.Logger) *Server {
-	return &Server{Store: s, Token: token, Log: log, Now: time.Now, watchers: map[chan int64]struct{}{}}
+	return &Server{
+		Store: s, Token: token, Log: log, Now: time.Now,
+		watchers:   map[chan int64]struct{}{},
+		sessions:   map[string]webSession{},
+		ceremonies: map[string]ceremony{},
+		failures:   map[string]*failCount{},
+	}
 }
 
 // Routes returns the HTTP handler for the API.
@@ -47,6 +70,7 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /v1/export", s.guard(s.handleExport))
 	mux.HandleFunc("GET /v1/events", s.guard(s.handleEvents))
 	mux.HandleFunc("GET /v1/health", s.handleHealth)
+	s.passkeyRoutes(mux)
 	return mux
 }
 
@@ -62,22 +86,54 @@ func (s *Server) Notify(version int64) {
 	}
 }
 
+// guard accepts the device token or a passkey session. The token path is
+// unchanged: an Android client, the command line client and MCP all send a
+// bearer header and know nothing about passkeys.
 func (s *Server) guard(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.Token == "" {
 			h(w, r)
 			return
 		}
-		if s.authorized(r) {
+		if s.tokenAuthorized(r) || s.sessionValid(r) {
 			h(w, r)
 			return
 		}
-		w.Header().Set("WWW-Authenticate", `Bearer realm="teha"`)
-		writeErr(w, http.StatusUnauthorized, "a token is required")
+		s.denied(w)
 	}
 }
 
-func (s *Server) authorized(r *http.Request) bool {
+// guardToken accepts the device token and nothing else.
+//
+// Passkey enrolment sits behind this guard. The token is the one invitation
+// into this account, so a person who holds it can add a passkey, and a stolen
+// session cookie cannot grow into a permanent credential.
+func (s *Server) guardToken(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.Token == "" {
+			h(w, r)
+			return
+		}
+		if s.tokenAuthorized(r) {
+			h(w, r)
+			return
+		}
+		s.denied(w)
+	}
+}
+
+func (s *Server) denied(w http.ResponseWriter) {
+	w.Header().Set("WWW-Authenticate", `Bearer realm="teha"`)
+	writeErr(w, http.StatusUnauthorized, "a token is required")
+}
+
+// Authenticated reports whether the request may see the app. The web handler
+// asks this before it sends a browser to the login page.
+func (s *Server) Authenticated(r *http.Request) bool {
+	return s.Token == "" || s.tokenAuthorized(r) || s.sessionValid(r)
+}
+
+func (s *Server) tokenAuthorized(r *http.Request) bool {
 	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
 		if constantEqual(strings.TrimPrefix(h, "Bearer "), s.Token) {
 			return true
