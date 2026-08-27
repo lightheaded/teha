@@ -109,6 +109,18 @@ header .st{margin-left:auto;font-size:12.5px;color:var(--ink-3);font-family:var(
 .d-actions .d-del{color:var(--p1);border-color:transparent;background:none;padding-left:0}
 .d-actions .d-close{margin-left:auto;background:var(--accent);color:var(--accent-ink);border-color:transparent;font-weight:600}
 .d-hint{font-size:12.5px;color:var(--ink-3)}
+header .gear{background:none;border:none;padding:0 2px;font-size:17px;line-height:1;color:var(--ink-3);cursor:pointer}
+header .gear:hover{color:var(--accent)}
+.set h3{margin:0;font-size:16px}
+.set .grp{margin-top:4px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.set .state{font-size:14px;color:var(--ink-2)}
+.set .state.on{color:var(--accent)}
+.set .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.set .row input[type=time]{width:auto}
+.set button{border:1px solid var(--line);background:var(--bg);border-radius:7px;padding:7px 12px;cursor:pointer}
+.set button:hover{background:var(--bg-2)}
+.set button.go{background:var(--accent);color:var(--accent-ink);border-color:transparent;font-weight:600}
+.set .note{font-size:12.5px;color:var(--ink-3)}
 kbd{font-family:var(--mono);font-size:12px;background:var(--bg-2);border:1px solid var(--line);border-radius:4px;padding:1px 5px}
 </style>
 </head>
@@ -122,6 +134,7 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--bg-2);border:1px sol
     <header>
       <h2 id="title">Today</h2><span class="n" id="count"></span>
       <span class="st" id="status"></span>
+      <button class="gear" id="gear" aria-label="Settings" title="Settings">&#9881;</button>
     </header>
     <div class="qa">
       <input id="qa" placeholder="Add a task — try: milk tomorrow p1 #Home @store every week" autocomplete="off" spellcheck="false">

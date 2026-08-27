@@ -12,6 +12,7 @@ const S = {
   tasks: new Map(),
   projects: new Map(),
   labels: new Map(),
+  reminders: new Map(),
   outbox: [],
   view: { kind: 'filter', q: 'today', title: 'Today' },
   sel: 0,
@@ -42,6 +43,7 @@ function save() {
       tasks: [...S.tasks.values()],
       projects: [...S.projects.values()],
       labels: [...S.labels.values()],
+      reminders: [...S.reminders.values()],
       outbox: S.outbox,
     }));
   } catch (e) { /* a full quota must never break the UI */ }
@@ -56,6 +58,7 @@ function load() {
     (d.tasks || []).forEach((t) => S.tasks.set(t.id, t));
     (d.projects || []).forEach((p) => S.projects.set(p.id, p));
     (d.labels || []).forEach((l) => S.labels.set(l.id, l));
+    (d.reminders || []).forEach((r) => S.reminders.set(r.id, r));
     S.outbox = d.outbox || [];
   } catch (e) { /* start clean on bad data */ }
 }
@@ -108,6 +111,7 @@ function applyDelta(d) {
   (d.projects || []).forEach((p) => p.deleted_at ? S.projects.delete(p.id) : S.projects.set(p.id, p));
   (d.labels || []).forEach((l) => l.deleted_at ? S.labels.delete(l.id) : S.labels.set(l.id, l));
   (d.tasks || []).forEach((t) => t.deleted_at ? S.tasks.delete(t.id) : S.tasks.set(t.id, t));
+  (d.reminders || []).forEach((r) => r.deleted_at ? S.reminders.delete(r.id) : S.reminders.set(r.id, r));
 }
 
 function listenEvents() {
@@ -748,6 +752,10 @@ function openDetail(t) {
       <input class="d-labels" value="${esc((t.labels || []).join(', '))}" placeholder="store, call"></div>
     <div class="d-row"><span class="d-lab">Repeats</span>
       <input class="d-rrule" value="${esc(t.rrule || '')}" placeholder="FREQ=WEEKLY;BYDAY=MO"></div>
+    <div class="d-row"><span class="d-lab">Remind</span>
+      <select class="d-remind"${t.due_date ? '' : ' disabled'}>${REMIND_CHOICES.map(([v, label]) =>
+        `<option value="${v}"${String(remindOffset(t) === null ? '' : remindOffset(t)) === v ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select>
+      ${t.due_date ? '' : '<span class="d-hint">Set a due date first.</span>'}</div>
     <div class="d-subs">
       <span class="d-lab">Sub-tasks</span>
       ${kids.map((k) => `<div class="d-sub">${esc(k.title)}</div>`).join('')}
@@ -774,6 +782,8 @@ function openDetail(t) {
       const v = q(sel).value;
       if (v) patch({ [field]: v });
       else { delete t[field]; patch({}, [field]); }
+      // The reminder hangs off the due moment, so it moves with it.
+      if (field === 'due_date' || field === 'due_time') reArm(t);
     };
   };
 
@@ -783,6 +793,7 @@ function openDetail(t) {
   dateField('.d-time', 'due_time');
   dateField('.d-start', 'start_date');
   dateField('.d-deadline', 'deadline');
+  q('.d-remind').onchange = () => setReminder(t, q('.d-remind').value);
   q('.d-project').onchange = () => patch({ project_id: q('.d-project').value });
   q('.d-labels').onchange = () => {
     const labels = q('.d-labels').value.split(',').map((x) => x.trim()).filter(Boolean);
@@ -826,6 +837,287 @@ function closeDetail() {
   S.detail = null;
 }
 
+// --- notifications ----------------------------------------------------------
+// Web Push with VAPID, per docs/DECISIONS.md D-003. The browser asks its own
+// vendor's push service for an endpoint, the server keeps that endpoint with
+// two keys, and internal/push sends to it when a reminder comes due.
+//
+// Permission is asked inside a button press and never on load. A prompt that
+// arrives out of the blue gets "block", and a blocked site cannot ask again.
+
+const PUSH = {
+  supported: 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window,
+  key: '',         // the server's VAPID public key
+  serverOn: false, // the server holds a keypair
+  sub: null,       // this browser's subscription, if any
+  devices: 0,
+};
+
+// urlB64ToBytes turns the base64url public key into the Uint8Array that
+// pushManager.subscribe wants.
+function urlB64ToBytes(s) {
+  const pad = '='.repeat((4 - (s.length % 4)) % 4);
+  const raw = atob((s + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+}
+
+async function readPushState() {
+  if (!PUSH.supported) return PUSH;
+  try {
+    const res = await fetch('/v1/push/key');
+    if (res.ok) {
+      const d = await res.json();
+      PUSH.key = d.key || '';
+      PUSH.serverOn = !!d.enabled;
+      PUSH.devices = d.devices || 0;
+    }
+  } catch (e) { /* offline: the panel says what it knows */ }
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    PUSH.sub = await reg.pushManager.getSubscription();
+  } catch (e) { PUSH.sub = null; }
+  return PUSH;
+}
+
+// subscribePush asks for permission and registers this browser. It returns an
+// empty string on success, or one sentence a person can act on.
+async function subscribePush() {
+  if (!PUSH.supported) return 'This browser cannot receive push notifications.';
+  if (!PUSH.serverOn) return 'This server holds no VAPID key, so it cannot send notifications.';
+  const allowed = await Notification.requestPermission();
+  if (allowed !== 'granted') return 'The browser did not allow notifications for this site.';
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlB64ToBytes(PUSH.key),
+    });
+    const res = await fetch('/v1/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(sub),
+    });
+    if (!res.ok) return 'The server refused the subscription.';
+    PUSH.sub = sub;
+    return '';
+  } catch (e) {
+    return 'The browser could not subscribe: ' + e.message;
+  }
+}
+
+// unsubscribePush drops this device. The server row goes first, because a row
+// with no browser behind it is what makes a push service answer 410.
+async function unsubscribePush() {
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (!sub) { PUSH.sub = null; return ''; }
+    await fetch('/v1/push/unsubscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint: sub.endpoint }),
+    });
+    await sub.unsubscribe();
+    PUSH.sub = null;
+    return '';
+  } catch (e) {
+    return 'Could not unsubscribe: ' + e.message;
+  }
+}
+
+async function testPush() {
+  try {
+    const res = await fetch('/v1/push/test', { method: 'POST' });
+    if (!res.ok) return 'The server could not send a test.';
+    const d = await res.json();
+    return d.sent ? '' : 'No device is subscribed yet.';
+  } catch (e) {
+    return 'Could not reach the server.';
+  }
+}
+
+// --- reminders --------------------------------------------------------------
+// A reminder is a row like any other: it syncs, and every client sees it. The
+// browser owns the time zone, so the browser computes the exact moment and
+// sends the server UTC.
+
+function remindersFor(id) {
+  return [...S.reminders.values()].filter((r) => r.task_id === id && !r.deleted_at);
+}
+
+// remindOffset says how a task's reminder is set, as minutes before the due
+// moment. It returns null when the task has none.
+function remindOffset(t) {
+  const r = remindersFor(t.id)[0];
+  if (!r) return null;
+  return r.kind === 'before_due' ? (r.offset_min || 0) : 0;
+}
+
+// fireMoment turns the due day, the due time and an offset into one moment.
+// A task with a day but no time counts as 09:00, because a reminder at
+// midnight is a reminder nobody reads.
+function fireMoment(t, offsetMin) {
+  if (!t.due_date) return null;
+  const at = new Date(t.due_date + 'T' + (t.due_time || '09:00'));
+  if (isNaN(at.getTime())) return null;
+  at.setMinutes(at.getMinutes() - (offsetMin || 0));
+  return at.toISOString();
+}
+
+const REMIND_CHOICES = [
+  ['', 'No reminder'],
+  ['0', 'At the due time'],
+  ['10', '10 minutes before'],
+  ['30', '30 minutes before'],
+  ['60', '1 hour before'],
+  ['1440', '1 day before'],
+];
+
+// setReminder replaces every reminder of one task. One task carries one
+// reminder here: two notifications for one chore is noise, not care.
+function setReminder(t, choice) {
+  remindersFor(t.id).forEach((r) => {
+    S.reminders.delete(r.id);
+    queue('reminder_delete', { id: r.id });
+  });
+  if (choice === '') { render(); return; }
+  const min = Number(choice) || 0;
+  const at = fireMoment(t, min);
+  if (!at) { render(); return; }
+  const id = newId('r');
+  const kind = min > 0 ? 'before_due' : 'at_due';
+  S.reminders.set(id, { id, task_id: t.id, kind, fire_at: at, offset_min: min || undefined, v: 0 });
+  queue('reminder_add', { id, task_id: t.id, kind, fire_at: at, offset_min: min || undefined });
+  render();
+}
+
+// reArm moves the reminders of a task after its due day or time changed. A
+// reminder that still points at last week fires never, and the person would
+// not know why.
+function reArm(t) {
+  remindersFor(t.id).forEach((r) => {
+    if (r.kind === 'daily_digest') return;
+    if (!t.due_date) {
+      S.reminders.delete(r.id);
+      queue('reminder_delete', { id: r.id });
+      return;
+    }
+    const at = fireMoment(t, r.kind === 'before_due' ? (r.offset_min || 0) : 0);
+    if (!at || at === r.fire_at) return;
+    r.fire_at = at;
+    queue('reminder_update', { id: r.id, fire_at: at });
+  });
+}
+
+function digestReminder() {
+  return [...S.reminders.values()].find((r) => r.kind === 'daily_digest' && !r.deleted_at) || null;
+}
+
+function digestTime() {
+  const d = digestReminder();
+  if (!d) return '';
+  const at = new Date(d.fire_at);
+  if (isNaN(at.getTime())) return '';
+  return String(at.getHours()).padStart(2, '0') + ':' + String(at.getMinutes()).padStart(2, '0');
+}
+
+// setDigest arms one digest at a clock time. The next occurrence of that time
+// is the first one, and the server steps it one day forward after each send.
+function setDigest(hhmm) {
+  [...S.reminders.values()].filter((r) => r.kind === 'daily_digest').forEach((r) => {
+    S.reminders.delete(r.id);
+    queue('reminder_delete', { id: r.id });
+  });
+  if (!hhmm) { render(); return; }
+  const [h, m] = hhmm.split(':').map(Number);
+  const at = new Date();
+  at.setHours(h || 0, m || 0, 0, 0);
+  if (at.getTime() <= Date.now()) at.setDate(at.getDate() + 1);
+  const id = newId('r');
+  const fire = at.toISOString();
+  S.reminders.set(id, { id, kind: 'daily_digest', fire_at: fire, v: 0 });
+  queue('reminder_add', { id, kind: 'daily_digest', fire_at: fire });
+  render();
+}
+
+// --- settings ---------------------------------------------------------------
+
+async function openSettings() {
+  closeDetail();
+  const el = document.createElement('div');
+  el.className = 'sheet';
+  el.innerHTML = `<div class="card set" role="dialog" aria-label="Settings">
+    <h3>Settings</h3>
+    <div class="grp">Notifications on this device</div>
+    <div class="state" id="set-state">Checking&hellip;</div>
+    <div class="row" id="set-row"></div>
+    <div class="note" id="set-note">Every device subscribes once, the browser and the installed app alike.</div>
+    <div class="grp">Daily digest</div>
+    <div class="row">
+      <input type="time" id="set-dtime" value="${digestTime() || '08:00'}" aria-label="Digest time">
+      <button id="set-don" class="go">${digestReminder() ? 'Change' : 'Turn on'}</button>
+      ${digestReminder() ? '<button id="set-doff">Turn off</button>' : ''}
+    </div>
+    <div class="note">One notification each morning, with what is due that day.</div>
+    <div class="d-actions">
+      <span class="d-hint">Escape closes.</span>
+      <button class="d-close">Done</button>
+    </div>
+  </div>`;
+  document.body.appendChild(el);
+  S.detail = 'settings';
+
+  const q = (sel) => el.querySelector(sel);
+  q('.d-close').onclick = closeDetail;
+  el.onclick = (e) => { if (e.target === el) closeDetail(); };
+  q('#set-don').onclick = () => { setDigest(q('#set-dtime').value); closeDetail(); openSettings(); };
+  if (q('#set-doff')) q('#set-doff').onclick = () => { setDigest(''); closeDetail(); openSettings(); };
+
+  const paint = (message) => {
+    const state = q('#set-state');
+    const row = q('#set-row');
+    row.innerHTML = '';
+    const button = (label, primary, run) => {
+      const b = document.createElement('button');
+      b.textContent = label;
+      if (primary) b.className = 'go';
+      b.onclick = async () => { b.disabled = true; paint(await run()); };
+      row.appendChild(b);
+    };
+    if (!PUSH.supported) {
+      state.textContent = 'This browser cannot receive push notifications.';
+      return;
+    }
+    if (!PUSH.serverOn) {
+      state.textContent = 'This server holds no VAPID key, so it sends no notifications.';
+      q('#set-note').textContent = 'The operator runs teha -vapid-keys once, then sets the two variables.';
+      return;
+    }
+    if (Notification.permission === 'denied') {
+      state.className = 'state';
+      state.textContent = 'The browser blocked notifications for this site.';
+      q('#set-note').textContent = 'Allow them in the browser site settings, then open this panel again.';
+      return;
+    }
+    if (PUSH.sub) {
+      state.className = 'state on';
+      state.textContent = 'Notifications are on for this device.';
+      button('Send a test', true, testPush);
+      button('Turn off', false, unsubscribePush);
+    } else {
+      state.className = 'state';
+      state.textContent = 'Notifications are off for this device.';
+      // The permission prompt happens inside this click. That is the only
+      // moment a browser accepts it, and the only moment a person expects it.
+      button('Turn on notifications', true, subscribePush);
+    }
+    if (message) q('#set-note').textContent = message;
+  };
+
+  await readPushState();
+  paint('');
+}
+
 // --- input ------------------------------------------------------------------
 
 function wire() {
@@ -854,6 +1146,7 @@ function wire() {
     } else if (e.key === 'Escape') { qa.value = ''; qa.blur(); $('hint').innerHTML = ''; }
   });
   $('fab').onclick = () => qa.focus();
+  $('gear').onclick = () => openSettings();
 
   document.addEventListener('keydown', (e) => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
@@ -905,6 +1198,7 @@ function wire() {
       case 'u': if (S.undo) { const u = S.undo.undo; S.undo = null; u(); } break;
       case 'e': case 'o': e.preventDefault(); openDetail(cur); break;
       case '?': showKeys(); break;
+      case ',': e.preventDefault(); openSettings(); break;
       case 'g': S.view = { q: 'today', title: 'Today' }; S.sel = 0; render(); break;
       case 'r': sync(); break;
     }
@@ -930,6 +1224,7 @@ function showKeys() {
     <dt>u</dt><dd>undo the last action</dd>
     <dt>r</dt><dd>sync now</dd>
     <dt>g</dt><dd>go to Today</dd>
+    <dt>,</dt><dd>settings and notifications</dd>
     <dt>?</dt><dd>this list</dd></dl></div>`;
   el.onclick = () => el.remove();
   document.body.appendChild(el);
@@ -943,4 +1238,31 @@ wire();
 sync().then(listenEvents);
 window.addEventListener('online', () => { S.online = true; sync(); });
 window.addEventListener('offline', () => { S.online = false; render(); });
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+  // A click on a notification reaches an open window through the worker. The
+  // worker raises the window, and the app opens the task the reminder named.
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    const m = e.data || {};
+    if (m.type === 'open-task' && m.task_id) showTask(m.task_id);
+  });
+}
+
+// showTask opens one task by id, whether it is in the current view or not.
+function showTask(id) {
+  const t = S.tasks.get(id);
+  if (!t) { sync(); return; }
+  const rows = visible();
+  const at = rows.findIndex((r) => r.id === id);
+  if (at >= 0) S.sel = at;
+  render();
+  openDetail(t);
+}
+
+// A notification opens /?task=<id> when no window was open. Clear the query
+// afterwards, so a reload does not open the sheet again.
+const opening = new URLSearchParams(location.search).get('task');
+if (opening) {
+  history.replaceState(null, '', location.pathname);
+  setTimeout(() => showTask(opening), 0);
+}
