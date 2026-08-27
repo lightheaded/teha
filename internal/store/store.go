@@ -45,10 +45,70 @@ func Open(path string) (*Store, error) {
 	if _, err := db.Exec(schemaSQL); err != nil {
 		return nil, fmt.Errorf("schema: %w", err)
 	}
+	if err := s.migrate(); err != nil {
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	if err := s.seedInbox(); err != nil {
 		return nil, err
 	}
 	return s, nil
+}
+
+// migrate adds a column that a database from an older build does not have.
+//
+// schema.sql runs with CREATE TABLE IF NOT EXISTS, which does nothing at all to
+// a table that already exists. A new column therefore never reaches a live
+// account from that file, and the account keeps working until the first query
+// names the column. An ALTER is the only way in, and SQLite has no
+// "ADD COLUMN IF NOT EXISTS", so each step asks PRAGMA table_info first.
+//
+// One code path serves a fresh file and an old one: the column is absent from
+// schema.sql, so both files take the ALTER. The two cannot drift, and there is
+// no version number to keep in step. An index on the new column belongs here as
+// well, because schema.sql runs before the ALTER.
+//
+// The data is safe. ADD COLUMN rewrites no row: SQLite records the new column
+// in the header and reads a missing value as the default, which is NULL here.
+// A task in an upgraded account is therefore in no section, which is what it
+// was before the column existed. See DECISIONS.md D-009.
+func (s *Store) migrate() error {
+	steps := []struct{ table, column, ddl string }{
+		{"task", "section_id", `ALTER TABLE task ADD COLUMN section_id TEXT REFERENCES section(id)`},
+	}
+	for _, st := range steps {
+		has, err := s.hasColumn(st.table, st.column)
+		if err != nil {
+			return err
+		}
+		if has {
+			continue
+		}
+		if _, err := s.db.Exec(st.ddl); err != nil {
+			return fmt.Errorf("%s.%s: %w", st.table, st.column, err)
+		}
+	}
+	// The board reads one project at a time, and Pull reads by version, so the
+	// index that matches is the pair.
+	_, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS task_by_section ON task(section_id)`)
+	return err
+}
+
+func (s *Store) hasColumn(table, column string) (bool, error) {
+	rows, err := s.db.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // Close closes the database.
@@ -116,6 +176,16 @@ type Project struct {
 	Version   int64   `json:"v"`
 }
 
+// Section is a heading inside one project, and a column on the board layout.
+type Section struct {
+	ID        string  `json:"id"`
+	ProjectID string  `json:"project_id"`
+	Name      string  `json:"name"`
+	OrderKey  string  `json:"order_key"`
+	DeletedAt *string `json:"deleted_at,omitempty"`
+	Version   int64   `json:"v"`
+}
+
 // Label is a tag on a task.
 type Label struct {
 	ID        string  `json:"id"`
@@ -129,6 +199,7 @@ type Label struct {
 type Task struct {
 	ID           string   `json:"id"`
 	ProjectID    string   `json:"project_id"`
+	SectionID    *string  `json:"section_id,omitempty"`
 	ParentID     *string  `json:"parent_id,omitempty"`
 	OrderKey     string   `json:"order_key"`
 	Title        string   `json:"title"`
@@ -150,14 +221,14 @@ type Task struct {
 	Version      int64    `json:"v"`
 }
 
-const taskCols = `id, project_id, parent_id, order_key, title, description, priority,
+const taskCols = `id, project_id, section_id, parent_id, order_key, title, description, priority,
 	due_date, due_time, due_tz, rrule, rrule_from_completion, start_date, deadline, duration_min,
 	state, completed_at, deleted_at, source_ref, version`
 
 func scanTask(rows *sql.Rows) (Task, error) {
 	var t Task
 	var fromComplete int
-	err := rows.Scan(&t.ID, &t.ProjectID, &t.ParentID, &t.OrderKey, &t.Title, &t.Description,
+	err := rows.Scan(&t.ID, &t.ProjectID, &t.SectionID, &t.ParentID, &t.OrderKey, &t.Title, &t.Description,
 		&t.Priority, &t.DueDate, &t.DueTime, &t.DueTz, &t.RRule, &fromComplete, &t.StartDate, &t.Deadline,
 		&t.DurationMin, &t.State, &t.CompletedAt, &t.DeletedAt, &t.SourceRef, &t.Version)
 	t.FromComplete = fromComplete == 1
@@ -170,13 +241,14 @@ func scanTask(rows *sql.Rows) (Task, error) {
 type Delta struct {
 	Version  int64     `json:"version"`
 	Projects []Project `json:"projects"`
+	Sections []Section `json:"sections"`
 	Labels   []Label   `json:"labels"`
 	Tasks    []Task    `json:"tasks"`
 }
 
 // Pull returns every row with a version above since.
 func (s *Store) Pull(since int64) (Delta, error) {
-	d := Delta{Projects: []Project{}, Labels: []Label{}, Tasks: []Task{}}
+	d := Delta{Projects: []Project{}, Sections: []Section{}, Labels: []Label{}, Tasks: []Task{}}
 	v, err := s.Version()
 	if err != nil {
 		return d, err
@@ -197,6 +269,21 @@ func (s *Store) Pull(since int64) (Delta, error) {
 		}
 		p.IsInbox = inbox == 1
 		d.Projects = append(d.Projects, p)
+	}
+	rows.Close()
+
+	rows, err = s.db.Query(`SELECT id, project_id, name, order_key, deleted_at, version
+		FROM section WHERE version > ? ORDER BY version`, since)
+	if err != nil {
+		return d, err
+	}
+	for rows.Next() {
+		var sec Section
+		if err := rows.Scan(&sec.ID, &sec.ProjectID, &sec.Name, &sec.OrderKey, &sec.DeletedAt, &sec.Version); err != nil {
+			rows.Close()
+			return d, err
+		}
+		d.Sections = append(d.Sections, sec)
 	}
 	rows.Close()
 
@@ -328,6 +415,25 @@ func (s *Store) Projects() ([]Project, error) {
 		}
 		p.IsInbox = inbox == 1
 		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// Sections returns every live section, ordered inside its project.
+func (s *Store) Sections() ([]Section, error) {
+	rows, err := s.db.Query(`SELECT id, project_id, name, order_key, deleted_at, version
+		FROM section WHERE deleted_at IS NULL ORDER BY project_id, order_key, name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Section{}
+	for rows.Next() {
+		var sec Section
+		if err := rows.Scan(&sec.ID, &sec.ProjectID, &sec.Name, &sec.OrderKey, &sec.DeletedAt, &sec.Version); err != nil {
+			return nil, err
+		}
+		out = append(out, sec)
 	}
 	return out, rows.Err()
 }

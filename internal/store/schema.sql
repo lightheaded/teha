@@ -81,3 +81,26 @@ CREATE INDEX IF NOT EXISTS label_by_version   ON label(version);
 -- A plain FTS index, written by the store on every task change. An external
 -- content table needs triggers, and the store already owns every write.
 CREATE VIRTUAL TABLE IF NOT EXISTS task_fts USING fts5(task_id UNINDEXED, title, description);
+
+-- A section is a heading inside one project, and a column on the board layout.
+-- The shape follows project and label: a short id, an order key, the three
+-- stamps and the version counter.
+--
+-- task.section_id is NOT here. This file runs with CREATE TABLE IF NOT EXISTS,
+-- which does nothing to a task table that already exists, so a new column on a
+-- live account needs an ALTER. Store.migrate owns that step, and it also owns
+-- the index on the new column. See internal/store/store.go and DECISIONS.md
+-- D-009.
+CREATE TABLE IF NOT EXISTS section (
+  id         TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES project(id),
+  name       TEXT NOT NULL,
+  order_key  TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT,
+  version    INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS section_by_version ON section(version);
+CREATE INDEX IF NOT EXISTS section_by_project ON section(project_id, order_key);
