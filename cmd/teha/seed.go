@@ -30,6 +30,7 @@ func seedExample(st *store.Store, base time.Time) error {
 		id       string
 		title    string
 		project  string
+		section  string
 		due      string
 		priority int
 		labels   []string
@@ -42,18 +43,28 @@ func seedExample(st *store.Store, base time.Time) error {
 		{"p_shop", "Shopping", "orange"},
 		{"p_trip", "Trip to Setomaa", "blue"},
 	}
+	// The sections of the trip project, so the board layout has columns.
+	sections := []struct{ id, project, name string }{
+		{"x_plan", "p_trip", "Plan"},
+		{"x_book", "p_trip", "Booked"},
+		{"x_pack", "p_trip", "Pack"},
+	}
+	// No task is added or removed here, and no field of a task changes except
+	// the section and its order key. The other README screenshots therefore
+	// stay byte for byte the same: a section shows in no list view, and the
+	// sidebar counts do not move.
 	tasks := []task{
-		{"t_s1", "Book the guest house", "Trip to Setomaa", day(2), 1, nil, "", "Two nights, check the sauna."},
-		{"t_s2", "Print the route", "Trip to Setomaa", "", 4, nil, "", ""},
-		{"t_s3", "Pack rain jackets", "Trip to Setomaa", day(6), 3, nil, "", ""},
-		{"t_h1", "Change the water filter", "Home", day(-2), 2, nil, "FREQ=MONTHLY", ""},
-		{"t_h2", "Take out the bins", "Home", day(0), 4, nil, "FREQ=WEEKLY;BYDAY=TU", ""},
-		{"t_h3", "Call the plumber", "Home", day(0), 1, []string{"call"}, "", ""},
-		{"t_g1", "Oat milk", "Shopping", "", 4, []string{"store"}, "", ""},
-		{"t_g2", "Rye bread", "Shopping", "", 4, []string{"store"}, "", ""},
-		{"t_g3", "Coffee beans", "Shopping", "", 4, []string{"store"}, "", ""},
-		{"t_i1", "Read the plan and pick the first milestone", "", day(0), 2, nil, "", ""},
-		{"t_i2", "Try the MCP server from a Claude session", "", day(1), 2, []string{"teha"}, "", ""},
+		{"t_s1", "Book the guest house", "Trip to Setomaa", "x_book", day(2), 1, nil, "", "Two nights, check the sauna."},
+		{"t_s2", "Print the route", "Trip to Setomaa", "x_plan", "", 4, nil, "", ""},
+		{"t_s3", "Pack rain jackets", "Trip to Setomaa", "x_pack", day(6), 3, nil, "", ""},
+		{"t_h1", "Change the water filter", "Home", "", day(-2), 2, nil, "FREQ=MONTHLY", ""},
+		{"t_h2", "Take out the bins", "Home", "", day(0), 4, nil, "FREQ=WEEKLY;BYDAY=TU", ""},
+		{"t_h3", "Call the plumber", "Home", "", day(0), 1, []string{"call"}, "", ""},
+		{"t_g1", "Oat milk", "Shopping", "", "", 4, []string{"store"}, "", ""},
+		{"t_g2", "Rye bread", "Shopping", "", "", 4, []string{"store"}, "", ""},
+		{"t_g3", "Coffee beans", "Shopping", "", "", 4, []string{"store"}, "", ""},
+		{"t_i1", "Read the plan and pick the first milestone", "", "", day(0), 2, nil, "", ""},
+		{"t_i2", "Try the MCP server from a Claude session", "", "", day(1), 2, []string{"teha"}, "", ""},
 	}
 
 	cmds := []store.Command{}
@@ -62,8 +73,21 @@ func seedExample(st *store.Store, base time.Time) error {
 			ID: p.id, Name: &p.name, Color: &p.color,
 		}))
 	}
-	for _, t := range tasks {
+	for i, sec := range sections {
+		cmds = append(cmds, cmd("section_add", store.SectionArgs{
+			ID: sec.id, ProjectID: strptr(sec.project), Name: strptr(sec.name),
+			OrderKey: strptr(fmt.Sprintf("m%06d", (i+1)*10)),
+		}))
+	}
+	for i, t := range tasks {
 		a := store.TaskArgs{ID: t.id, Title: strptr(t.title)}
+		if t.section != "" {
+			a.SectionID = strptr(t.section)
+			// A board arranges work by hand, so a seeded task needs a key of
+			// its own. Without one every card in a column shares the key "m"
+			// and the order falls back to the title.
+			a.OrderKey = strptr(fmt.Sprintf("m%06d", (i+1)*10))
+		}
 		if t.project != "" {
 			a.Project = strptr(t.project)
 		}
