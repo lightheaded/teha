@@ -49,10 +49,11 @@ MCP server that an agent can drive for a whole session.
 
 ## Status
 
-Proof of concept. The server, the sync engine, the filter language, the web app
-and the MCP server run. The Android app, the macOS app, sharing and push do not
-exist yet. Read [docs/PLAN.md](docs/PLAN.md) for the phased plan and
-[docs/POC.md](docs/POC.md) for what this build proves and what it does not.
+Proof of concept. The server, the sync engine, the filter language, the web app,
+the MCP server and the Android app run. The browser signs in with a passkey. The
+macOS app, sharing and push do not exist yet. Read [docs/PLAN.md](docs/PLAN.md)
+for the phased plan and [docs/POC.md](docs/POC.md) for what this build proves and
+what it does not.
 
 ## Run it
 
@@ -69,7 +70,19 @@ TEHA_TOKEN=$(openssl rand -hex 32) ./teha -db teha.db -addr 127.0.0.1:8637
 ```
 
 The token guards the API, the MCP endpoint and the web app. The browser asks for
-it once and keeps it in a cookie. Passkeys replace this in a later milestone.
+it once and keeps it in a cookie.
+
+The browser can also use a passkey. Open **Settings** in the app, name the
+passkey and press **Add**. The sign-in page then has a **Sign in with a passkey**
+button, and the token box stays below it as the fallback. Enrolment asks for the
+device token, so only a person who already holds it can add a passkey. On a
+public hostname, name the relying party:
+
+```sh
+TEHA_RP_ID=teha.example TEHA_ORIGIN=https://teha.example ./teha -db teha.db
+```
+
+Both values default to the request host, so a run on `localhost` needs neither.
 
 ## What works today
 
@@ -85,8 +98,12 @@ it once and keeps it in a cookie. Passkeys replace this in a later milestone.
 - **MCP server** at `/mcp`, specification revision 2026-07-28, stateless. Eight
   tools, batch writes, compact results. The daily plan costs one call and about
   460 bytes.
+- **Passkeys** for the browser, beside the device token. WebAuthn with a
+  discoverable credential and required user verification, a session cookie of
+  its own, and a lockout after repeated failures.
 - **Keyboard**: `q` quick add, `j`/`k` move, `x` complete, `e` open the detail,
-  `1`..`4` priority, `t`/`m`/`w` schedule, `u` undo, `?` the key list.
+  `1`..`4` priority, `t`/`m`/`w` schedule, `u` undo, `,` settings, `?` the key
+  list.
 
 ## Measured
 
@@ -116,7 +133,7 @@ AGPL-3.0-or-later, the server:
   cmd/teha          the binary: server, seed, import, command line client
   internal/store    SQLite schema, commands, sync, queries
   internal/api      HTTP: /v1/sync, /v1/tasks, /v1/projects, /v1/labels,
-                    /v1/events, /v1/export, /v1/health
+                    /v1/events, /v1/export, /v1/health, /v1/passkeys
   internal/mcpsrv   the MCP server and its tools
   internal/webui    the web app, embedded in the binary
   internal/todoist  the Todoist importer

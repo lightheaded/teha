@@ -69,6 +69,9 @@ Open <http://127.0.0.1:8637>.
 | `-addr` | `TEHA_ADDR` | `127.0.0.1:8637` | The listen address. |
 | `-db` | `TEHA_DB` | `teha.db` | The path to the SQLite file. |
 | `-token` | `TEHA_TOKEN` | empty | The device token. |
+| `-rp-id` | `TEHA_RP_ID` | empty | The WebAuthn relying-party id, a bare domain such as `teha.example`. Empty reads it from the request host. |
+| `-origin` | `TEHA_ORIGIN` | empty | The origin the web app is served from, such as `https://teha.example`. Empty builds it from the request host. |
+| `-trust-forwarded` | `TEHA_TRUST_FORWARDED` | off | Read the client address from `X-Forwarded-For`. Turn it on only behind a proxy that writes that header. |
 | `-dev` | — | off | No token, debug logs. |
 | `-seed` | — | off | Write example data and exit. |
 | `-version` | — | — | Print `teha 0.1.0 (proof of concept)` and exit. |
@@ -134,6 +137,52 @@ The command line client refuses a token file that a group or another user can
 read. It names the file and the `chmod` command. The token value never reaches
 the screen, a log line or an error message.
 
+### Passkeys
+
+A passkey is a second way into the same account, for the browser. The device
+token stays, because the Android app, the command line client and the MCP
+endpoint all use it.
+
+**Enrol one.** Sign in with the token, open **Settings** in the header (or press
+`,`), type a name and press **Add**. The browser asks for a fingerprint, a face
+or a PIN. The list then shows the passkey, its last use and a **Remove** button.
+
+Enrolment asks for the device token and nothing else. A browser that signed in
+with a passkey cannot add another one: it must paste the token once more. The
+token is therefore the one invitation into the account, which is what keeps
+signup invite-only.
+
+**Sign in.** The sign-in page has a **Sign in with a passkey** button. The token
+box stays below it. A good assertion sets the `teha_session` cookie: Secure,
+HTTP-only, same-site Lax, and it lasts 14 days. **Sign out** in Settings clears
+it, and so does `POST /v1/logout`.
+
+**Name the deployment.** A passkey is bound to one relying-party id for life, so
+set the id and the origin on a public hostname:
+
+```sh
+TEHA_RP_ID=teha.example TEHA_ORIGIN=https://teha.example ./teha -db teha.db
+```
+
+Both values default to the request host, so a run on `localhost` needs neither.
+The scheme follows the host: https on a real name, http on a loopback name.
+A browser only runs a passkey in a secure context, so those are the two cases.
+
+**What the server refuses.** Every one of these answers 401 and writes nothing:
+
+- an assertion from another origin, or from another relying-party id
+- a signature counter that does not increase, which is what a replay looks like
+- an unknown credential id, or a user handle no account carries
+- an assertion that reports no user verification
+
+Repeated failures lock the client address out, and the account has its own
+budget as well. The wait doubles with each failure above the allowance, up to
+15 minutes. `-trust-forwarded` makes the lockout read the real address behind a
+proxy. Without it a client could write its own address and escape the ban.
+
+A restart clears the sessions and the lockout counters, because both live in
+memory. A passkey login is one tap, so a restart costs one tap.
+
 ### The HTTP routes
 
 | Route | Method | Function |
@@ -145,8 +194,15 @@ the screen, a log line or an error message.
 | `/v1/export` | GET | The whole account as one JSON file. |
 | `/v1/events` | GET | Server-sent events. One `version` event per write, and a ping every 25 seconds. |
 | `/v1/health` | GET | `{"ok":true,"version":18}`. No token. |
+| `/v1/passkeys/register/begin` | POST | Start an enrolment. Needs the device token. |
+| `/v1/passkeys/register/finish` | POST | Finish an enrolment. `?name=` names the passkey. Needs the device token. |
+| `/v1/passkeys/login/begin` | POST | Start a login. No token. |
+| `/v1/passkeys/login/finish` | POST | Finish a login and set the session cookie. No token. |
+| `/v1/passkeys` | GET | Every passkey, without its public key. |
+| `/v1/passkeys/{id}` | DELETE | Remove one passkey. |
+| `/v1/logout` | POST | Clear the session cookie and the token cookie. |
 | `/mcp` | POST | The MCP endpoint. |
-| `/login` | GET, POST | The token form. |
+| `/login` | GET, POST | The passkey button and the token form. |
 | `/` | GET | The web app. |
 
 ---
@@ -157,11 +213,19 @@ Open the server address, for example <http://127.0.0.1:8637>.
 
 ### Log in
 
-With a token set, `/` sends the browser to `/login`. Type the token, then press
-**Sign in**. The server writes the `teha_token` cookie. The cookie is HTTP-only
-and same-site. It carries the Secure flag over TLS only. It lasts one year.
+With a token set, `/` sends the browser to `/login`. The page offers two ways in.
+
+**A passkey.** Press **Sign in with a passkey**. The browser asks for a
+fingerprint, a face or a PIN, and the server writes the `teha_session` cookie
+for 14 days. The button appears only where the browser can make a passkey.
+
+**The token.** Type the token, then press **Sign in with the token**. The server
+writes the `teha_token` cookie. The cookie is HTTP-only, same-site and Secure on
+any real hostname. It lasts one year.
 
 A wrong token returns to the form with the message `That token did not match.`
+
+Read [Passkeys](#passkeys) for the enrolment and the rules the server applies.
 
 ### The screen
 
