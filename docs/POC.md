@@ -43,6 +43,35 @@ Tested:
   of the batches are sent twice. Every client, and a fresh client that pulls from
   zero, ends at the same state as the server.
 
+*Updated 2026-08-27. §6.1 makes seven promises about sync, and there is now one
+property for each of them. A seeded generator builds the command stream and
+gives every command the rows it depends on, so the same set of commands runs in
+two different legal orders.*
+
+| Property | What it proves |
+|---|---|
+| Commands commute | Two orders of one conflict-free stream reach the same state, over every table and every field. A third pass changes nothing |
+| Idempotence across a restart | The store closes, opens and refuses the whole stream again. `applied_command` is a table, not a cache |
+| Monotone version | The counter never goes backwards, never repeats, and moves if and only if a command was accepted |
+| Last write wins per field | Every pair of 13 task fields, in both orders. Both edits survive, and a field nobody named does not move |
+| Temporary ids | One batch builds a project, a sub-project, a label, three levels of sub-task and a task that names its project by name, and every reference resolves |
+| Every device catches up | Three devices, one of them offline for a long stretch, all reach the server state, and so does a device that starts from nothing |
+| No lost edit, on the server | The version of a row equals the highest change log entry that names it, every accepted command holds a distinct version, no change log entry names a row that does not exist, and one search row exists per task |
+
+The clock is injected, so nothing reads the wall clock. Five seeds are fixed and
+one comes from the clock, so CI repeats a laptop failure and a long run still
+finds what a fixed corpus cannot. Every failure prints its seed, and
+`TEHA_SEED=<seed> go test` repeats one case. Go has no shrinker, so a failure
+prints the first line of the state that differs instead of two states of
+hundreds of rows. `-short` cuts the seeds and the stream, so the whole suite
+runs in about 3 seconds, and a full run of the properties at `-count=20` takes
+38 seconds.
+
+The fractional index that §6.1 promises did not exist: every write path put the
+literal `m` into `order_key`. It is now the `order` package with its own
+property test, and D-009 records the choice. No client calls it yet, so
+[BACKLOG.md](BACKLOG.md) carries that.
+
 ## 3. A filter language that means one thing everywhere
 
 One grammar compiles to a SQL `WHERE` clause on the server, and the same grammar
@@ -119,6 +148,43 @@ tasks, a completed task, a timed task with a zone, labels and comments.
 33 recurrence forms and 13 clean failures are under test, together with the
 backoff on 429 and 5xx, and the redaction of the token in every error.
 
+*Updated 2026-08-27. A second fixture tree, `internal/todoist/testdata/zeroloss/`,
+holds only the hard cases and nothing else. Every row in it is invented: no real
+id, no real name, no personal content and no token. A guard test reads the two
+files and refuses an address, a user id or a token, so the tree cannot rot into
+a recording of a real account.*
+
+The zero loss test walks the payload instead of a list of expected numbers, so a
+row added to the fixture is a row the test demands.
+
+| Hard case | What the test demands |
+|---|---|
+| A project two levels deep | Both parent links survive |
+| Two sections | The name is the first line of the description, and the summary counts it |
+| Three labels on one task | All three arrive, in one command |
+| A sub-task three levels deep | Every level points at the right parent |
+| A completed task | It closes and keeps its completion time |
+| An `every!` rule | The rule converts and the from-completion flag is set |
+| A task that is complete and repeating | It keeps both, because a completion would otherwise move it to its next date |
+| A deadline with a duration | Both carry, with the clock time |
+| Two comments on one task | Both fold into the description, oldest first, and a deleted one does not |
+| Two saved filters | Both names and both queries reach the summary, and a deleted one does not |
+| An empty title | The row still arrives, as "(no title)", and keeps its description |
+| An emoji and a right to left script | The title survives byte for byte |
+| A due date with a time zone | The date, the clock time and the zone name all carry |
+| A deleted, missing or archived project | The task lands in the inbox and is never dropped |
+| A sub-task whose parent never arrived | It becomes a top level task |
+| Two pages | The cursor loop reads both, in two requests, with one full sync |
+
+The pacing is under test as well: one full sync against a documented limit of
+100 per 15 minutes, two requests against a limit of 1 000, at most 100 commands
+per batch, and every batch body far under 1 MiB. The default pace of the client
+stays at one request per second.
+
+The resume is under test at every point. The command stream is cut after each of
+its 26 commands, and the run that resumes has to reach the state of a clean run
+every time. That is what found bug 9.
+
 ## 6. Capture from the macOS keyboard, today
 
 The same binary is a client. That covers capture before the Tauri app exists.
@@ -192,7 +258,38 @@ public entry point.*
    draws produce no repeat.
 6. **Two clients disagreed about an unknown project.** The command line client
    created it, and the web app used the inbox. Both now use the inbox and say
-   so.
+   so. `TestZeroLossHandlesTheUnknownProjectTheSameWayEverywhere` locks all
+   three write paths: the importer and the command line client fall back to the
+   inbox, the store refuses to guess so an agent gets an error it can repair,
+   and none of the three invents a project.
+7. **A command that failed halfway kept what it had written.** Every command of
+   a batch ran in one transaction with no savepoint. A `task_update` against a
+   task that does not exist first created the labels it named, then hit the
+   foreign key and reported a failure, and the account was left holding a label
+   that nobody asked for. The version had moved for a command that nobody
+   accepted, so every client woke up for nothing. Each command now runs in its
+   own savepoint.
+8. **A deleted label never reached a client that had already synced.** A pull
+   hides a deleted label from the label list of a task, so the list of a task
+   changed while the task row did not. A client pulls with `version > since`, so
+   it never saw the task again and kept showing a label that the account had
+   deleted. The row was right on the server and wrong on every synced client. A
+   label delete now moves the version of every task that carries it. The
+   property test found it on seed 7.
+9. **An interrupted import lost the completed state of a task.** A completed
+   task costs two commands, and a completed repeating task three. A resume finds
+   the task by its `source_ref` and skips it, so the `task_complete` that
+   followed the `task_add` was never rebuilt. A run that died between the two
+   left the task open for ever and a completed repeating task lost its rule as
+   well. The resume now re-issues only what the store still needs, with the same
+   command uuids, so a plain second run still writes nothing. The test cuts the
+   command stream at all 26 points and demands the state of a clean run at every
+   one. It failed at cut 17.
+10. **A saved filter vanished without a word.** The sync model had no `filters`
+    field, so the importer never read one and never named one. Our schema still
+    has no filter table, so it writes none, but it now prints every name and
+    every query the way it already does for a project comment. A gap a person
+    can see is not a loss.
 
 ## Next, in order
 
