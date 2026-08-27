@@ -11,6 +11,13 @@
 //	before: <date> | after: <date> | deadline | no deadline
 //	& (and) | (or) ! (not) ( ) , (or, one saved filter shows several lists)
 //
+// Three terms close the gaps that §6.3 of docs/PLAN.md names, where Todoist
+// cannot answer at all:
+//
+//	done | completed | any state    show completed tasks
+//	comment: text                   query the text of a comment
+//	with subtasks: <term>           show a parent together with its sub-tasks
+//
 // The same grammar runs in the web app over the local database, so one filter
 // string means the same thing in the app, in a saved view and in an MCP call.
 package filter
@@ -291,6 +298,29 @@ func (p *parser) term(word string) (string, []any, error) {
 		case "search":
 			like := "%" + strings.ToLower(v) + "%"
 			return "(lower(title) LIKE ? OR lower(description) LIKE ?)", []any{like, like}, nil
+		case "comment", "note":
+			// Todoist cannot search the text of a comment, and §6.3 closes that
+			// gap. Our schema has no comment table yet, so a comment lives in
+			// the description: the importer folds one in, and the clients write
+			// one there. The term therefore searches the description only, and
+			// it points at the right column on the day the table arrives.
+			like := "%" + strings.ToLower(v) + "%"
+			return "lower(description) LIKE ?", []any{like}, nil
+		case "with subtasks", "with sub-tasks", "family":
+			// Todoist shows a matching sub-task without its parent, and a
+			// matching parent without its sub-tasks. This term answers with the
+			// whole family, so a person reading a filter sees the context.
+			inner, iargs, err := p.term(v)
+			if err != nil {
+				return "", nil, err
+			}
+			args := append([]any{}, iargs...)
+			args = append(args, iargs...)
+			args = append(args, iargs...)
+			return "((" + inner + ")" +
+					" OR parent_id IN (SELECT id FROM task WHERE " + inner + ")" +
+					" OR id IN (SELECT parent_id FROM task WHERE parent_id IS NOT NULL AND " + inner + "))",
+				args, nil
 		case "date", "due":
 			d, err := p.date(v)
 			if err != nil {
