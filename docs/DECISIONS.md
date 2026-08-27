@@ -298,7 +298,7 @@ one request, one transaction, and a row nobody named does not move.
 **Reverses if:** a batch ever grows past what one request can hold. The answer
 then is paging over ids, not a query inside a command.
 
-## D-009 — The fractional index lives in a shared package, not in the store
+## D-013 — The fractional index lives in a shared package, not in the store
 
 **Date:** 2026-08-27 · **Status:** done
 

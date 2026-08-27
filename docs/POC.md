@@ -69,7 +69,7 @@ runs in about 3 seconds, and a full run of the properties at `-count=20` takes
 
 The fractional index that §6.1 promises did not exist: every write path put the
 literal `m` into `order_key`. It is now the `order` package with its own
-property test, and D-009 records the choice. No client calls it yet, so
+property test, and D-013 records the choice. No client calls it yet, so
 [BACKLOG.md](BACKLOG.md) carries that.
 
 ## 3. A filter language that means one thing everywhere

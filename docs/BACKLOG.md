@@ -10,7 +10,7 @@ A row leaves this file when a test covers it.
 
 - **Three clients still write the literal `m` into `order_key`.** The
   fractional index now exists as the `order` package with a property test, and
-  D-009 in [DECISIONS.md](DECISIONS.md) records why. No client calls it: the
+  D-013 in [DECISIONS.md](DECISIONS.md) records why. No client calls it: the
   web app, the Android repository and the store all write `m`, and the importer
   writes a fixed-width number of the Todoist child order. Until a client adopts
   the package, a list falls back to its secondary sort keys and a drag cannot be
