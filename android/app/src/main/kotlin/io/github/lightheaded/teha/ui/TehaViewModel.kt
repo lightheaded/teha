@@ -28,12 +28,56 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-enum class TaskView { TODAY, ALL }
+/**
+ * TaskView is one view of the list: a filter string and the title to show.
+ *
+ * A query, not an enumeration case. The shared Go compiler turns the string
+ * into a WHERE clause over the local Room database, so the phone reaches every
+ * view the browser has, every project, and anything a person types. See
+ * filter/schema.go for the two dialects of one compiler.
+ */
+data class TaskView(val query: String, val title: String)
+
+/**
+ * BUILT_IN_VIEWS are the views on the phone.
+ *
+ * The first six are the browser's, in the browser's order. VIEWS in
+ * internal/webui/assets/app.js holds the same list, so a change belongs in both
+ * files or the two clients drift.
+ *
+ * All open is the seventh, and the browser has no equal of it. The phone had it
+ * before this list existed, and an empty query means every open task, so it
+ * stays.
+ */
+val BUILT_IN_VIEWS = listOf(
+    TaskView("today", "Today"),
+    TaskView("overdue", "Overdue"),
+    TaskView("week", "Next 7 days"),
+    TaskView("#inbox", "Inbox"),
+    TaskView("no date", "No date"),
+    TaskView("p1", "Priority 1"),
+    TaskView("", "All open"),
+)
+
+/**
+ * projectView is the view of one project.
+ *
+ * The query is the string a person can also type, so the phone and the browser
+ * build one view from one name. A name that holds a filter operator (&, |, !, a
+ * comma or a parenthesis) reaches no client, because the grammar reads the
+ * operator first. docs/BACKLOG.md records that limit.
+ */
+fun projectView(project: ProjectEntity): TaskView =
+    TaskView("#${project.name}", project.name)
 
 data class UiState(
-    val view: TaskView = TaskView.TODAY,
+    val view: TaskView = BUILT_IN_VIEWS.first(),
     val syncing: Boolean = false,
     val message: String? = null,
+    // filterError holds what the filter compiler said about the last query a
+    // person typed. The compiler names the position that failed, so the text
+    // goes to the field unchanged.
+    val filterError: String? = null,
     // undoLabel is set when the message on screen can be taken back. The
     // snackbar shows it as an action, and a null label means no action.
     val undoLabel: String? = null,
@@ -54,14 +98,20 @@ class TehaViewModel(app: Application) : AndroidViewModel(app) {
 
     // The query changes only when the view or the day changes. A message or an
     // outbox count must not restart the database flow.
+    //
+    // The filter compiles here rather than in the state, because the meaning of
+    // "today" moves at midnight. A view holds the words, and the SQL is made
+    // again whenever the day changes under it.
     @OptIn(ExperimentalCoroutinesApi::class)
     val tasks: StateFlow<List<TaskEntity>> =
         combine(_state.map { it.view }.distinctUntilChanged(), today) { view, day -> view to day }
             .flatMapLatest { (view, day) ->
-                when (view) {
-                    TaskView.TODAY -> repo.todayTasks(day)
-                    TaskView.ALL -> repo.openTasks()
-                }
+                val compiled = Binding.compileFilterRoom(view.query, day)
+                // setFilter refuses a bad query before it becomes a view, so
+                // this path is for a view that stopped compiling later. An
+                // empty list is the honest answer, and never a crash.
+                if (compiled.error.isNotEmpty()) flowOf(emptyList<TaskEntity>())
+                else repo.tasks(compiled.sql, compiled.argValues)
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -153,7 +203,42 @@ class TehaViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setView(v: TaskView) {
-        _state.value = _state.value.copy(view = v)
+        _state.value = _state.value.copy(view = v, filterError = null)
+    }
+
+    /**
+     * setFilter takes a query a person typed and makes a view of it.
+     *
+     * The compiler judges the query first, and a refusal never becomes a view.
+     * The message it returns names the position that failed, so it reaches the
+     * field unchanged. An empty query means every open task.
+     *
+     * The title is the query itself. A person who typed the words recognises
+     * them, and no shorter name is honest.
+     *
+     * The answer is true when the query became the view. The caller closes the
+     * navigation on a true and leaves it open on a false, so the field that
+     * holds the mistake stays on screen.
+     */
+    fun setFilter(text: String): Boolean {
+        val query = text.trim()
+        if (query.isEmpty()) {
+            setView(BUILT_IN_VIEWS.last())
+            return true
+        }
+        val compiled = Binding.compileFilterRoom(query, today.value)
+        if (compiled.error.isNotEmpty()) {
+            _state.value = _state.value.copy(filterError = compiled.error)
+            return false
+        }
+        _state.value = _state.value.copy(view = TaskView(query, query), filterError = null)
+        return true
+    }
+
+    fun dismissFilterError() {
+        if (_state.value.filterError != null) {
+            _state.value = _state.value.copy(filterError = null)
+        }
     }
 
     fun dismissMessage() {

@@ -190,7 +190,7 @@ Start date, deadline, duration and `wont_do` exist in the schema from Phase 1 ev
 
 ### 6.3 Filter language
 
-One grammar, one parser in Go (server, MCP) and one in TypeScript and Kotlin (clients, for offline views), one fixture corpus. The Go parser compiles a query to a SQL `WHERE` clause with parameters. Client parsers compile to a predicate over local rows. The grammar is Todoist's, plus the Phase 3 extensions.
+One grammar and one fixture corpus. The Go parser compiles a query to a SQL `WHERE` clause with parameters, and it takes the table and column names as a value, so one parser emits the names of the server database and the names of a client store. The Android app therefore calls the same compiler through the gomobile binding (D-002, D-014) and needs no parser of its own. The browser still evaluates a subset in JavaScript over its local rows, which is the one place where a client can drift. The grammar is Todoist's, plus the Phase 3 extensions.
 
 ### 6.4 Quick add parser
 
@@ -265,7 +265,7 @@ Auth: a per-device bearer token in Phase 1. Claude Code connects with `claude mc
 | M1 Core server | Schema, sync, filters, recurrence, export, import | Todoist account imports with zero loss. Property test converges. | **Done, 2026-08-27.** One property per sync promise of §6.1, over a seeded command stream in two legal orders. Zero loss proven against a synthetic fixture that holds only the hard cases, with the resume cut at every command. Four defects found and fixed: bugs 7 to 10 in [POC.md](POC.md). Accounts: passkeys ship for the browser beside the device token, per [DECISIONS.md](DECISIONS.md) D-009. The password fallback is not built, because the token already is one. Open items, none of them blocking, are in [BACKLOG.md](BACKLOG.md): no client writes an order key yet, and a comment and a saved filter still have no table. |
 | M2 Web | Views, quick add, keyboard, offline, PWA | Author uses the web app for one week without Todoist | Views, quick add, the task detail, the keyboard, offline and the service worker run. A project view also draws its sections as a board, with drag and with keys. The week has not started. |
 | M3 MCP | Tools, token auth, Claude Code config | An agent plans the day in three calls, never times out | Eight tools, stateless transport, token auth. `plan_day` answers in one call and 114 tokens. |
-| M4 Android | Offline core, tile, share, gestures, Obtainium | Author uninstalls Todoist from the phone | Not started. |
+| M4 Android | Offline core, tile, share, gestures, Obtainium | Author uninstalls Todoist from the phone | The app ships through Obtainium. Offline core, the tile, the detail screen, bulk actions, the six views of the browser, a view per project and a filter field all run. Share, notifications and background sync are open. |
 | M5 macOS | Tauri app, global shortcut, URL scheme | Author removes the Todoist hotkey | A command line client covers capture first. |
 | M6 Household | Sharing, comments, push, shopping mode | Partner uses it for groceries for one month without asking for Todoist. Two phones tick items in the same shop and neither buys a duplicate | Push runs: reminders, a daily digest and Web Push to the browser and the installed app. Sharing, comments and shopping mode are open, and they need the second account first. The partner uses Android, so the app matters more than the PWA. |
 | M7 Beyond | Start dates, snooze, dependencies, review, macros, Obsidian bridge | A trip is planned in the vault and shopped from the app | Schema carries start date, deadline and `wont_do` already. |
@@ -275,8 +275,9 @@ Auth: a per-device bearer token in Phase 1. Claude Code connects with `claude mc
 
 Decisions with a lasting consequence live in [DECISIONS.md](DECISIONS.md):
 the licence split (D-001), the Android parser binding (D-002), Web Push
-(D-003), the iOS answer (D-004), the once-only reminder (D-010) and the
-missed-reminder window (D-011).
+(D-003), the iOS answer (D-004), the once-only reminder (D-010), the
+missed-reminder window (D-011) and the naming scheme in the filter compiler
+(D-014).
 
 Three choices in this plan changed when the code met reality. Each one is small, and each one has a reason.
 

@@ -31,6 +31,20 @@ object Binding {
     fun compileFilter(query: String, today: String = todayIso()): CompiledFilter =
         json.decodeFromString(CompiledFilter.serializer(), Mobile.compileFilter(query, today))
 
+    /**
+     * compileFilterRoom compiles a filter against the local Room database.
+     *
+     * The server and Room hold the same rows under different names, so the Go
+     * compiler takes the names as a value and emits either dialect. One filter
+     * string therefore means one thing here, in the browser and on the server.
+     * See filter/schema.go for the mapping.
+     *
+     * The result is a WHERE clause only. The caller adds the test for a
+     * deleted row and the sort of the view.
+     */
+    fun compileFilterRoom(query: String, today: String = todayIso()): CompiledFilter =
+        json.decodeFromString(CompiledFilter.serializer(), Mobile.compileFilterRoom(query, today))
+
     fun nextRecurrence(rule: String, base: String, today: String, fromCompletion: Boolean): Recurrence =
         json.decodeFromString(
             Recurrence.serializer(),

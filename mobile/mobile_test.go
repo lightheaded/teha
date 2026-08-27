@@ -75,6 +75,47 @@ func TestCompileFilterRejects(t *testing.T) {
 	}
 }
 
+// The phone reads its own Room database, so the clause must name the Room
+// columns and never the server ones.
+func TestCompileFilterRoom(t *testing.T) {
+	got := decode(t, CompileFilterRoom("today & %work", "2026-08-25"))
+	sql, ok := got["sql"].(string)
+	if !ok || sql == "" {
+		t.Fatalf("sql = %v", got["sql"])
+	}
+	for _, want := range []string{"dueDate", "labels"} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("sql %q does not name %q", sql, want)
+		}
+	}
+	for _, banned := range []string{"due_date", "task_label"} {
+		if strings.Contains(sql, banned) {
+			t.Errorf("sql %q names the server column %q", sql, banned)
+		}
+	}
+	args, ok := got["args"].([]any)
+	if !ok || len(args) != 2 {
+		t.Fatalf("args = %v, want the day and the label pattern", got["args"])
+	}
+}
+
+func TestCompileFilterRoomRejects(t *testing.T) {
+	// The Room database keeps no creation date, so this term cannot work
+	// there. The message says so, and no SQL comes back.
+	got := decode(t, CompileFilterRoom("created: today", "2026-08-25"))
+	if _, ok := got["error"]; !ok {
+		t.Errorf("want an error key, got %v", got)
+	}
+	got = decode(t, CompileFilterRoom("today &", "2026-08-25"))
+	if _, ok := got["error"]; !ok {
+		t.Errorf("want an error key, got %v", got)
+	}
+	got = decode(t, CompileFilterRoom("today", "not a day"))
+	if _, ok := got["error"]; !ok {
+		t.Errorf("want an error key, got %v", got)
+	}
+}
+
 func TestNextRecurrence(t *testing.T) {
 	got := decode(t, NextRecurrence("FREQ=WEEKLY", "2026-08-25", "2026-08-25", false))
 	if got["due"] != "2026-09-01" {

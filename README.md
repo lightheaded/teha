@@ -50,11 +50,12 @@ MCP server that an agent can drive for a whole session.
 ## Status
 
 Proof of concept. The server, the sync engine, the filter language, the web app,
-the MCP server and the Android app run. The browser signs in with a passkey.
-Reminders reach the browser and the installed web app through Web Push. The macOS
-app, sharing and a second account do not exist yet. Read
-[docs/PLAN.md](docs/PLAN.md) for the phased plan and [docs/POC.md](docs/POC.md)
-for what this build proves and what it does not.
+the MCP server and the Android app run. The browser signs in with a passkey, and
+reminders reach it through Web Push. The phone reaches the same six views as the
+browser, one view per project, and any filter you type. The macOS app, sharing
+and a second account do not exist yet. Read [docs/PLAN.md](docs/PLAN.md) for the
+phased plan and [docs/POC.md](docs/POC.md) for what this build proves and what it
+does not.
 
 ## Run it
 
@@ -91,10 +92,13 @@ Both values default to the request host, so a run on `localhost` needs neither.
   parses on the client, so the task appears before any network call.
 - **Offline first.** Every edit lands in the local store and an outbox. The app
   works with the server down and drains the outbox when the server returns.
-- **One filter language** in the app, the API and the MCP tools: `today`,
-  `overdue`, `#Project`, `##Project`, `/Section`, `%label`, `p1`, `no date`,
-  `no section`, `recurring`, `search:`, `before:`, `deadline:`, with `&`, `|`,
-  `!` and parentheses.
+- **One filter language** in the app, the phone, the API and the MCP tools:
+  `today`, `overdue`, `#Project`, `##Project`, `/Section`, `%label`, `p1`,
+  `no date`, `no section`, `recurring`, `search:`, `before:`, `deadline:`, with
+  `&`, `|`, `!` and parentheses. One compiler serves the server and the phone:
+  it takes the table and column names as a value, so one grammar reads two
+  databases. The phone holds no section table, so a section term fails there
+  with a sentence.
 - **Recurrence** as RFC 5545 RRULE. A repeating task moves to its next date on
   completion, and a task months overdue moves to its next real slot.
 - **MCP server** at `/mcp`, specification revision 2026-07-28, stateless. Eight

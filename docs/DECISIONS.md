@@ -546,3 +546,50 @@ falls back to the secondary sort keys. Adopting the package is client work, and
 **Reverses if:** ordering moves to a server-assigned integer with a rewrite of
 the neighbours. That needs a lock and a fan-out per reorder, which is what a
 fractional index exists to avoid.
+
+---
+
+## D-014 — The filter compiler takes the table and column names as a value
+
+**Date:** 2026-08-27 · **Status:** done
+
+`filter.Compile` reads a naming scheme, `filter.Schema`, and emits a `WHERE`
+clause with those names. `ServerSchema` names the tables of
+`internal/store/schema.sql`. `RoomSchema` names the tables that the Android app
+creates. `mobile.CompileFilterRoom` is the second entry point, and it is a
+second argument to one parser and not a second parser.
+
+**Why.** The phone keeps the same rows as the server under different names: the
+table `tasks` rather than `task`, camelCase columns, every label name of a task
+in one comma-joined column rather than in a join table, no fts5 index and no
+creation date. Every compiled filter named columns that the phone does not have,
+so the phone could reach two hand-written views only.
+
+The alternative was a rewrite of the finished SQL on the way to the phone. That
+is fragile in a way a test finds late: a rewrite has to find a column name inside
+a string that also carries user text, so the query `search: due_date` loses its
+own search term. A name that the compiler never wrote cannot be mangled.
+
+**Cost.** A Schema value carries about 25 names, and a new term in the grammar
+has to take its names from that value rather than write them. A store that is
+missing a column has to say so: `created:` fails on the phone with a sentence,
+because no column can answer it.
+
+**Consequence.**
+
+- A client store may name its rows what it likes, and it must never rewrite the
+  SQL that the compiler emits.
+- The Apache-2.0 layer stays free of any dependency on either store. A Schema is
+  a plain value, so D-001 holds.
+- A label term on the phone is a `LIKE` over a padded copy of the joined column,
+  `',' || labels || ','`, so `%work` cannot match `homework`. The pattern escapes
+  `%`, `_` and the escape character, or a label named `50%` would match every
+  label.
+- A label name that holds a comma cannot be named in any client, because a comma
+  is the OR operator of the grammar.
+- `search:` is a `LIKE` over the title and the description in both dialects. The
+  server has `task_fts` and the phone has none, so the compiler names neither.
+
+**Reverses if:** a third store needs a shape that a naming scheme cannot
+describe, for example a labels column with a different separator. The answer then
+is a small emitter interface per store, not a string rewrite.

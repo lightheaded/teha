@@ -29,17 +29,28 @@ import (
 	"time"
 )
 
-// Compile turns a query into a SQL fragment plus its arguments.
+// Compile turns a query into a SQL fragment plus its arguments, with the names
+// of the server database.
 // today fixes the meaning of relative words, so a test is stable.
 func Compile(query string, today time.Time) (string, []any, error) {
-	p := &parser{lex: lex(query), today: today}
+	return CompileFor(query, today, ServerSchema)
+}
+
+// CompileFor turns a query into a SQL fragment plus its arguments, with the
+// names that s gives.
+//
+// One parser, two dialects. A client whose local store names the same rows
+// differently passes its own Schema, so one filter string means one thing in
+// every client and on the server. See Schema.
+func CompileFor(query string, today time.Time, s Schema) (string, []any, error) {
+	p := &parser{lex: lex(query), today: today, s: s}
 	p.next()
 	if p.tok.kind == tokEOF {
 		// An empty query means every OPEN task, not every task. It used to
 		// return here before the narrowing below, so `list_tasks` with no
 		// filter and `teha ls` with no argument both answered with completed
 		// rows as well.
-		return "state = 'open'", nil, nil
+		return s.State + " = 'open'", nil, nil
 	}
 	sql, args, err := p.parseOr()
 	if err != nil {
@@ -54,7 +65,7 @@ func Compile(query string, today time.Time) (string, []any, error) {
 	// search for the word done, or a project named Done, used to switch the
 	// narrowing off and silently mix completed rows into an ordinary view.
 	if !p.saidState {
-		sql = "(" + sql + ") AND state = 'open'"
+		sql = "(" + sql + ") AND " + s.State + " = 'open'"
 	}
 	return sql, args, nil
 }
@@ -121,6 +132,8 @@ type parser struct {
 	at    int
 	tok   token
 	today time.Time
+	// s names the tables and the columns the output refers to.
+	s Schema
 	// saidState records that the query named a task state itself, so Compile
 	// must not narrow to open tasks on top of it. A term sets this, not a
 	// search of the query text: the text "search: done" and a project called
@@ -204,122 +217,134 @@ func (p *parser) parseUnary() (string, []any, error) {
 func (p *parser) term(word string) (string, []any, error) {
 	low := strings.ToLower(strings.TrimSpace(word))
 	day := func(d int) string { return p.today.AddDate(0, 0, d).Format("2006-01-02") }
+	s := p.s
 
 	switch low {
 	case "today", "tod":
-		return "(due_date IS NOT NULL AND due_date <= ?)", []any{day(0)}, nil
+		return fmt.Sprintf("(%[1]s IS NOT NULL AND %[1]s <= ?)", s.DueDate), []any{day(0)}, nil
 	case "tomorrow", "tom":
-		return "due_date = ?", []any{day(1)}, nil
+		return s.DueDate + " = ?", []any{day(1)}, nil
 	case "yesterday":
-		return "due_date = ?", []any{day(-1)}, nil
+		return s.DueDate + " = ?", []any{day(-1)}, nil
 	case "overdue", "od", "over due":
-		return "(due_date IS NOT NULL AND due_date < ?)", []any{day(0)}, nil
+		return fmt.Sprintf("(%[1]s IS NOT NULL AND %[1]s < ?)", s.DueDate), []any{day(0)}, nil
 	case "no date", "no due date", "nodate":
-		return "due_date IS NULL", nil, nil
+		return s.DueDate + " IS NULL", nil, nil
 	case "no time":
-		return "due_time IS NULL", nil, nil
+		return s.DueTime + " IS NULL", nil, nil
 	case "has time":
-		return "due_time IS NOT NULL", nil, nil
+		return s.DueTime + " IS NOT NULL", nil, nil
 	case "recurring":
-		return "(rrule IS NOT NULL AND rrule <> '')", nil, nil
+		return fmt.Sprintf("(%[1]s IS NOT NULL AND %[1]s <> '')", s.RRule), nil, nil
 	case "subtask":
-		return "parent_id IS NOT NULL", nil, nil
+		return s.ParentID + " IS NOT NULL", nil, nil
 	case "no parent", "top level":
-		return "parent_id IS NULL", nil, nil
+		return s.ParentID + " IS NULL", nil, nil
 	case "no priority":
-		return "priority = 4", nil, nil
+		return s.Priority + " = 4", nil, nil
 	case "no deadline":
-		return "deadline IS NULL", nil, nil
+		return s.Deadline + " IS NULL", nil, nil
 	case "deadline":
-		return "deadline IS NOT NULL", nil, nil
+		return s.Deadline + " IS NOT NULL", nil, nil
 	case "no section", "no sections":
-		return "section_id IS NULL", nil, nil
+		if s.SectionID == "" {
+			return "", nil, fmt.Errorf("a section term needs a section table, and this client keeps none")
+		}
+		return s.SectionID + " IS NULL", nil, nil
 	case "no label", "no labels":
-		return "id NOT IN (SELECT task_id FROM task_label)", nil, nil
+		return p.noLabels(), nil, nil
 	case "started":
-		return "(start_date IS NULL OR start_date <= ?)", []any{day(0)}, nil
+		return fmt.Sprintf("(%[1]s IS NULL OR %[1]s <= ?)", s.StartDate), []any{day(0)}, nil
 	case "not started", "deferred":
-		return "(start_date IS NOT NULL AND start_date > ?)", []any{day(0)}, nil
+		return fmt.Sprintf("(%[1]s IS NOT NULL AND %[1]s > ?)", s.StartDate), []any{day(0)}, nil
 	case "done", "completed":
 		p.saidState = true
-		return "state = 'done'", nil, nil
+		return s.State + " = 'done'", nil, nil
 	case "wont do", "wont-do", "won't do", "skipped":
 		p.saidState = true
-		return "state = 'wont_do'", nil, nil
+		return s.State + " = 'wont_do'", nil, nil
 	case "open", "active":
 		p.saidState = true
-		return "state = 'open'", nil, nil
+		return s.State + " = 'open'", nil, nil
 	case "any state", "all states":
 		p.saidState = true
 		return "1=1", nil, nil
 	case "week", "next 7 days", "7 days":
-		return "(due_date IS NOT NULL AND due_date <= ?)", []any{day(7)}, nil
+		return fmt.Sprintf("(%[1]s IS NOT NULL AND %[1]s <= ?)", s.DueDate), []any{day(7)}, nil
 	}
 
 	// p1..p4
 	if len(low) == 2 && low[0] == 'p' && low[1] >= '1' && low[1] <= '4' {
 		n, _ := strconv.Atoi(low[1:])
-		return "priority = ?", []any{n}, nil
+		return s.Priority + " = ?", []any{n}, nil
 	}
 
 	// prefix forms
 	switch {
 	case strings.HasPrefix(word, "##"):
 		name := strings.TrimSpace(word[2:])
-		return `project_id IN (WITH RECURSIVE tree(id) AS (
-			SELECT id FROM project WHERE lower(name) = lower(?) AND deleted_at IS NULL
-			UNION ALL SELECT p.id FROM project p JOIN tree t ON p.parent_id = t.id)
-			SELECT id FROM tree)`, []any{name}, nil
+		return fmt.Sprintf(`%s IN (WITH RECURSIVE tree(id) AS (
+			SELECT %s FROM %s WHERE lower(%s) = lower(?) AND %s IS NULL
+			UNION ALL SELECT p.%s FROM %s p JOIN tree t ON p.%s = t.id)
+			SELECT id FROM tree)`,
+			s.ProjectID, s.ID, s.Project, s.Name, s.DeletedAt,
+			s.ID, s.Project, s.ParentID), []any{name}, nil
 	case strings.HasPrefix(word, "#"):
 		name := strings.TrimSpace(word[1:])
 		if strings.EqualFold(name, "inbox") {
-			return "project_id = 'inbox'", nil, nil
+			return fmt.Sprintf("%s = '%s'", s.ProjectID, s.InboxID), nil, nil
 		}
 		if strings.HasSuffix(name, "*") {
-			return `project_id IN (SELECT id FROM project WHERE lower(name) LIKE lower(?) AND deleted_at IS NULL)`,
+			return fmt.Sprintf(`%s IN (SELECT %s FROM %s WHERE lower(%s) LIKE lower(?) AND %s IS NULL)`,
+					s.ProjectID, s.ID, s.Project, s.Name, s.DeletedAt),
 				[]any{strings.TrimSuffix(name, "*") + "%"}, nil
 		}
-		return `project_id IN (SELECT id FROM project WHERE lower(name) = lower(?) AND deleted_at IS NULL)`,
-			[]any{name}, nil
+		return fmt.Sprintf(`%s IN (SELECT %s FROM %s WHERE lower(%s) = lower(?) AND %s IS NULL)`,
+			s.ProjectID, s.ID, s.Project, s.Name, s.DeletedAt), []any{name}, nil
 	case strings.HasPrefix(word, "/"):
 		// A section name follows the rules of a project name: an exact match,
 		// case-insensitive, and a trailing * for a prefix match. "Errand" and
 		// "Errands" are therefore two different sections, and a name that holds
 		// a % or a _ is literal text in the exact form.
+		if s.Section == "" || s.SectionID == "" {
+			return "", nil, fmt.Errorf("a section term needs a section table, and this client keeps none")
+		}
 		name := strings.TrimSpace(word[1:])
 		if strings.HasSuffix(name, "*") {
-			return `section_id IN (SELECT id FROM section WHERE lower(name) LIKE lower(?) AND deleted_at IS NULL)`,
+			return fmt.Sprintf(`%s IN (SELECT %s FROM %s WHERE lower(%s) LIKE lower(?) AND %s IS NULL)`,
+					s.SectionID, s.ID, s.Section, s.Name, s.DeletedAt),
 				[]any{strings.TrimSuffix(name, "*") + "%"}, nil
 		}
-		return `section_id IN (SELECT id FROM section WHERE lower(name) = lower(?) AND deleted_at IS NULL)`,
-			[]any{name}, nil
+		return fmt.Sprintf(`%s IN (SELECT %s FROM %s WHERE lower(%s) = lower(?) AND %s IS NULL)`,
+			s.SectionID, s.ID, s.Section, s.Name, s.DeletedAt), []any{name}, nil
 	case strings.HasPrefix(word, "%"), strings.HasPrefix(word, "@"):
 		// Todoist moved filters to %label and retires @ through 2026. Both work
 		// here, so an imported filter and a habit both keep working.
 		name := strings.TrimSpace(word[1:])
 		if strings.HasSuffix(name, "*") {
-			return `id IN (SELECT tl.task_id FROM task_label tl JOIN label l ON l.id = tl.label_id
-				WHERE lower(l.name) LIKE lower(?) AND l.deleted_at IS NULL)`,
-				[]any{strings.TrimSuffix(name, "*") + "%"}, nil
+			return p.labelTerm(strings.TrimSuffix(name, "*"), true)
 		}
-		return `id IN (SELECT tl.task_id FROM task_label tl JOIN label l ON l.id = tl.label_id
-			WHERE lower(l.name) = lower(?) AND l.deleted_at IS NULL)`, []any{name}, nil
+		return p.labelTerm(name, false)
 	}
 
 	// key: value forms
 	if k, v, ok := splitKey(low, word); ok {
 		switch k {
 		case "search":
-			like := "%" + strings.ToLower(v) + "%"
-			return "(lower(title) LIKE ? OR lower(description) LIKE ?)", []any{like, like}, nil
+			// A LIKE over the title and the description, in both dialects. The
+			// server has an fts5 table, and the Room database on the phone has
+			// none, so a compiled filter never names one. The MCP search tool
+			// reads fts5 on its own path.
+			return p.search(v)
 		case "comment", "note":
-			// Todoist cannot search the text of a comment, and §6.3 closes that
-			// gap. Our schema has no comment table yet, so a comment lives in
-			// the description: the importer folds one in, and the clients write
-			// one there. The term therefore searches the description only, and
-			// it points at the right column on the day the table arrives.
+			// Todoist cannot search the text of a comment, and section 6.3
+			// closes that gap. Our schema has no comment table yet, so a
+			// comment lives in the description: the importer folds one in, and
+			// the clients write one there. The term therefore searches the
+			// description only, and it points at the right column on the day
+			// the table arrives.
 			like := "%" + strings.ToLower(v) + "%"
-			return "lower(description) LIKE ?", []any{like}, nil
+			return fmt.Sprintf("lower(%s) LIKE ?", p.s.Description), []any{like}, nil
 		case "with subtasks", "with sub-tasks", "family":
 			// Todoist shows a matching sub-task without its parent, and a
 			// matching parent without its sub-tasks. This term answers with the
@@ -332,65 +357,137 @@ func (p *parser) term(word string) (string, []any, error) {
 			args = append(args, iargs...)
 			args = append(args, iargs...)
 			return "((" + inner + ")" +
-					" OR parent_id IN (SELECT id FROM task WHERE " + inner + ")" +
-					" OR id IN (SELECT parent_id FROM task WHERE parent_id IS NOT NULL AND " + inner + "))",
+					fmt.Sprintf(" OR %s IN (SELECT %s FROM %s WHERE ", p.s.ParentID, p.s.ID, p.s.Task) + inner + ")" +
+					fmt.Sprintf(" OR %s IN (SELECT %s FROM %s WHERE %s IS NOT NULL AND ", p.s.ID, p.s.ParentID, p.s.Task, p.s.ParentID) + inner + "))",
 				args, nil
 		case "date", "due":
 			d, err := p.date(v)
 			if err != nil {
 				return "", nil, err
 			}
-			return "due_date = ?", []any{d}, nil
+			return s.DueDate + " = ?", []any{d}, nil
 		case "before", "date before", "due before":
 			d, err := p.date(v)
 			if err != nil {
 				return "", nil, err
 			}
-			return "(due_date IS NOT NULL AND due_date < ?)", []any{d}, nil
+			return fmt.Sprintf("(%[1]s IS NOT NULL AND %[1]s < ?)", s.DueDate), []any{d}, nil
 		case "after", "date after", "due after":
 			d, err := p.date(v)
 			if err != nil {
 				return "", nil, err
 			}
-			return "(due_date IS NOT NULL AND due_date > ?)", []any{d}, nil
+			return fmt.Sprintf("(%[1]s IS NOT NULL AND %[1]s > ?)", s.DueDate), []any{d}, nil
 		case "deadline":
 			d, err := p.date(v)
 			if err != nil {
 				return "", nil, err
 			}
-			return "deadline = ?", []any{d}, nil
+			return s.Deadline + " = ?", []any{d}, nil
 		case "deadline before":
 			d, err := p.date(v)
 			if err != nil {
 				return "", nil, err
 			}
-			return "(deadline IS NOT NULL AND deadline < ?)", []any{d}, nil
+			return fmt.Sprintf("(%[1]s IS NOT NULL AND %[1]s < ?)", s.Deadline), []any{d}, nil
 		case "created before":
 			d, err := p.date(v)
 			if err != nil {
 				return "", nil, err
 			}
-			return "date(created_at) < ?", []any{d}, nil
+			return p.created("<", d)
 		case "created after":
 			d, err := p.date(v)
 			if err != nil {
 				return "", nil, err
 			}
-			return "date(created_at) > ?", []any{d}, nil
+			return p.created(">", d)
 		case "created":
 			d, err := p.date(v)
 			if err != nil {
 				return "", nil, err
 			}
-			return "date(created_at) = ?", []any{d}, nil
+			return p.created("=", d)
 		}
 	}
 
 	// A bare word searches the title, which is what a person expects.
-	like := "%" + low + "%"
-	return "(lower(title) LIKE ? OR lower(description) LIKE ?)", []any{like, like}, nil
+	return p.search(low)
 }
 
+// search matches text in the title or the description.
+func (p *parser) search(text string) (string, []any, error) {
+	like := "%" + strings.ToLower(text) + "%"
+	return fmt.Sprintf("(lower(%s) LIKE ? OR lower(%s) LIKE ?)", p.s.Title, p.s.Description),
+		[]any{like, like}, nil
+}
+
+// created compares the day a task was made. op is "<", ">" or "=".
+func (p *parser) created(op, day string) (string, []any, error) {
+	if p.s.CreatedAt == "" {
+		return "", nil, fmt.Errorf("created: needs a creation date, and this client keeps none")
+	}
+	return fmt.Sprintf("date(%s) %s ?", p.s.CreatedAt, op), []any{day}, nil
+}
+
+// noLabels matches a task that carries no label at all.
+func (p *parser) noLabels() string {
+	s := p.s
+	if s.Labels == "" {
+		return fmt.Sprintf("%s NOT IN (SELECT %s FROM %s)", s.ID, s.TaskLabelTask, s.TaskLabel)
+	}
+	return fmt.Sprintf("(%[1]s IS NULL OR %[1]s = '')", s.Labels)
+}
+
+// labelTerm matches one label by name, or by a name prefix.
+//
+// Two stores answer this differently. The server joins the task_label and the
+// label tables, so a name is an equality test. The phone keeps every label name
+// of a task in one column, joined by a comma, so the test is a LIKE over a copy
+// of that column with a comma added at each end. The pad is what makes the
+// match exact: ",work," cannot match "homework".
+//
+// A name comes from a person, so it can hold a LIKE wildcard. The pattern
+// therefore escapes "%", "_" and the escape character itself, and the SQL
+// declares ESCAPE. Without that, the label "50%" would match every label.
+//
+// A name that holds a comma matches, because the pad and the join use the same
+// separator. The reverse does not hold: two labels "a" and "b" also answer a
+// query for a label named "a,b". A comma inside a label name is a defect of the
+// joined column, which android/README.md records.
+func (p *parser) labelTerm(name string, prefix bool) (string, []any, error) {
+	s := p.s
+	if s.Labels == "" {
+		test := "="
+		arg := name
+		if prefix {
+			test = "LIKE"
+			arg = name + "%"
+		}
+		return fmt.Sprintf(`%s IN (SELECT tl.%s FROM %s tl JOIN %s l ON l.%s = tl.%s
+			WHERE lower(l.%s) %s lower(?) AND l.%s IS NULL)`,
+			s.ID, s.TaskLabelTask, s.TaskLabel, s.Label, s.ID, s.TaskLabelLabel,
+			s.Name, test, s.DeletedAt), []any{arg}, nil
+	}
+	pattern := "%," + escapeLike(name)
+	if prefix {
+		pattern += "%"
+	} else {
+		pattern += ",%"
+	}
+	return fmt.Sprintf(`lower(',' || ifnull(%s,'') || ',') LIKE lower(?) ESCAPE '\'`, s.Labels),
+		[]any{pattern}, nil
+}
+
+// escapeLike makes a literal out of text that a LIKE pattern holds.
+//
+// The order matters: the escape character goes first, or the escape this
+// function adds for a "%" is escaped again.
+func escapeLike(text string) string {
+	text = strings.ReplaceAll(text, `\`, `\\`)
+	text = strings.ReplaceAll(text, "%", `\%`)
+	return strings.ReplaceAll(text, "_", `\_`)
+}
 func splitKey(low, raw string) (string, string, bool) {
 	i := strings.Index(low, ":")
 	if i < 0 {

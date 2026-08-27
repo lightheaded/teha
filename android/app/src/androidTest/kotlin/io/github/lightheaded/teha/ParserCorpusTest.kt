@@ -87,4 +87,28 @@ class ParserCorpusTest {
         assertEquals("", compiled.error)
         assertTrue("no SQL came back", compiled.sql.isNotEmpty())
     }
+
+    /**
+     * The phone reads its own database, so a filter must name the Room columns.
+     *
+     * One name from the server schema throws at run time, where no Go test can
+     * see it. filter/schema_test.go holds the meaning of every term, and this
+     * case holds the contract of the binding: two dialects, one grammar.
+     */
+    @Test
+    fun filterCompilesForRoom() {
+        val compiled = Binding.compileFilterRoom("today & %work & #Home", "2026-08-25")
+        assertEquals("", compiled.error)
+        for (name in listOf("dueDate", "labels", "projectId", "FROM projects")) {
+            assertTrue("${compiled.sql} does not name $name", compiled.sql.contains(name))
+        }
+        for (name in listOf("due_date", "project_id", "task_label", "FROM task ")) {
+            assertTrue("${compiled.sql} names the server column $name", !compiled.sql.contains(name))
+        }
+        // The Room database keeps no creation date, so the term cannot work
+        // there. The message says so, and the server dialect still takes it.
+        val refused = Binding.compileFilterRoom("created: today", "2026-08-25")
+        assertTrue("created: was accepted", refused.error.isNotEmpty())
+        assertEquals("", Binding.compileFilter("created: today", "2026-08-25").error)
+    }
 }

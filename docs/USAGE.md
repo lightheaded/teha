@@ -462,9 +462,13 @@ Two rules are worth knowing:
 
 ### The browser filter is a subset
 
-The browser evaluates the filter over the local rows. It knows fewer terms than
-the server. A term that it does not know becomes a title search, so a view
-quietly shows the wrong rows.
+This is about the browser alone. The phone calls the shared Go compiler through
+the gomobile binding, so it reads every term the server reads, except
+`created:`.
+
+The browser evaluates the filter over the local rows in its own JavaScript. It
+knows fewer terms than the server. A term that it does not know becomes a title
+search, so a view quietly shows the wrong rows.
 
 | The browser knows | The browser does not know |
 |---|---|
@@ -595,8 +599,14 @@ The corpus records this case. Put such a word in the description instead.
 
 ## 4. Filters
 
-One filter language runs in the app, in `/v1/tasks`, in `teha ls` and in the
-MCP tools. The server compiles a query to a SQL `WHERE` clause.
+One filter language runs in the app, on the phone, in `/v1/tasks`, in `teha ls`
+and in the MCP tools. The server compiles a query to a SQL `WHERE` clause.
+
+The phone runs the same compiler over its own database, so every term below
+means the same thing there. One term is the exception: the phone refuses
+`created:`, because the local database keeps no creation date, and it says so
+rather than answer with the wrong rows. The browser is the one client that reads
+a subset. See [the table in section 2](#the-browser-filter-is-a-subset).
 
 ### The grammar
 
@@ -1113,12 +1123,11 @@ This build is a proof of concept. The list below comes from
 **No macOS app and no widget.** The web app and the command line client cover
 the desktop. The Android app ships through Obtainium, and
 [android/README.md](../android/README.md) holds the install steps and the list
-of open defects. The phone app shows Today and All open, captures with the Quick
-Settings tile, edits every field of a task, and acts on a picked set of tasks.
-It has no project view and no filter field yet. It also fires no reminder of its
-own: the plan gives the phone a local alarm from its own database, and that work
-is open. A phone that subscribes in its browser receives the server's push in
-the meantime.
+of open defects. The phone app captures with the Quick Settings tile, edits every
+field of a task, acts on a picked set of tasks, and reaches the six views of the
+browser, one view per project and any filter you type. It has no notification and
+no background sync. A phone that subscribes in its browser receives the server's
+push in the meantime.
 
 **One person only.** You cannot share a project. There is no second account,
 no assignee, no comment and no attachment. A reminder reaches a browser and an
@@ -1147,10 +1156,9 @@ Nothing else uses them.
 **The browser filter is a subset of the server filter.** Read
 [section 2](#the-browser-filter-is-a-subset).
 
-Next, in order: give the phone the project and filter views it still lacks,
-rehearse a restore from the Litestream replica, then add passkeys and a second
-account. [BACKLOG.md](BACKLOG.md) holds every knowingly unfinished thing with
-its reason.
+Next, in order: rehearse a restore from the Litestream replica, then add a
+second account so that two people can share a project. [BACKLOG.md](BACKLOG.md)
+holds every knowingly unfinished thing with its reason.
 
 The real Todoist import already ran, on 2026-08-25: 17 projects, 250 tasks, 63
 labels, 0 failed commands, one HTTP request, 34 milliseconds. It also found
