@@ -260,7 +260,7 @@ Auth: a per-device bearer token in Phase 1. Claude Code connects with `claude mc
 | M2 Web | Views, quick add, keyboard, offline, PWA | Author uses the web app for one week without Todoist | Views, quick add, the task detail, the keyboard, offline and the service worker run. The week has not started. |
 | M3 MCP | Tools, token auth, Claude Code config | An agent plans the day in three calls, never times out | Eight tools, stateless transport, token auth. `plan_day` answers in one call and 114 tokens. |
 | M4 Android | Offline core, tile, share, gestures, Obtainium | Author uninstalls Todoist from the phone | Not started. |
-| M5 macOS | Tauri app, global shortcut, URL scheme | Author removes the Todoist hotkey | A command line client covers capture first. |
+| M5 macOS | Tauri app, global shortcut, URL scheme | Author removes the Todoist hotkey | Built. The shell hosts the web app, the shortcut opens a quick add panel, the menu bar icon and `teha://add?text=` work, and the token is in the keychain. Unsigned, per section 4. The exit test needs a week of use. |
 | M6 Household | Sharing, comments, push, shopping mode | Partner uses it for groceries for one month without asking for Todoist. Two phones tick items in the same shop and neither buys a duplicate | Not started. The partner uses Android, so the app matters more than the PWA. |
 | M7 Beyond | Start dates, snooze, dependencies, review, macros, Obsidian bridge | A trip is planned in the vault and shopped from the app | Schema carries start date, deadline and `wont_do` already. |
 | M8 Open | F-Droid, docs, hosted pilot | A stranger self-hosts from the README in under 15 minutes | Dockerfile, compose, kustomize and a deployment guide exist. |
@@ -352,6 +352,7 @@ Settled by research on 2026-08-25:
 - Todoist filters now use `%label`, not `@label`. The free plan is called Beginner.
 - The MCP specification revision to build against is 2026-07-28, and it is stateless.
 - Versions to pin: `modernc.org/sqlite` v1.57.0, Litestream v0.5.16, Room 2.8.4, Glance 1.1.1, Tauri v2.11.5, MCP Go SDK v1.7.0, Svelte 5.56.
+- The desktop shell pins more than Tauri itself, because Tauri v2 keeps each plugin on its own release train. Read 2026-08-27, exact in `desktop/src-tauri/Cargo.toml`: `tauri` 2.11.5, `tauri-build` 2.6.3, `tauri-plugin-deep-link` 2.4.9, `tauri-plugin-global-shortcut` 2.3.2, `tauri-plugin-single-instance` 2.4.3, `keyring` 3.6.3, `serde` 1.0.229, `serde_json` 1.0.151, `url` 2.5.8, and the `tauri-cli` tool 2.11.4.
 - The public entry point preserves the client address, so per-IP lockout works.
 - `rrule-go` is the only serious Go RRULE library, and it is stale. The build wraps it.
 - No existing open-source project fits. Vikunja comes closest and has no tile, no strong parser and no official MCP server.

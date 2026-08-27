@@ -121,7 +121,10 @@ backoff on 429 and 5xx, and the redaction of the token in every error.
 
 ## 6. Capture from the macOS keyboard, today
 
-The same binary is a client. That covers capture before the Tauri app exists.
+The same binary is a client. It covered capture before the Tauri shell
+existed, and it still covers a machine that has no shell installed. The
+desktop app in `desktop/` is the shorter road now: one keystroke, a panel, and
+`teha://add?text=` for a launcher.
 
 ```
 $ teha add "Book the ferry next tuesday at 9:30 p1 #Trip @call"
@@ -159,10 +162,16 @@ The Go parser and the web parser both run the corpus in
 *Updated 2026-08-26. The Android app now ships, and the server runs behind the
 public entry point.*
 
-- No macOS app and no widget. The Android app has a quick settings tile, and it
-  covers two views only: Today and All open. The browser has six built-in views
-  plus one per project, so the phone cannot reach a project list at all. This is
-  the largest gap that remains between the two clients.
+- No widget, and no signature on the macOS app. The desktop shell now ships: it
+  hosts the web app, a global shortcut opens a quick add panel over every
+  application, a menu bar icon carries the menu, and `teha://add?text=` adds a
+  task from Shortcuts, Raycast or Keyboard Maestro. The build is unsigned, per
+  the Phase 4 decision about identity, and the panel shows no parse hint before
+  `Enter`, because the parser is in the page.
+- The Android app has a quick settings tile, and it covers two views only:
+  Today and All open. The browser has six built-in views plus one per project,
+  so the phone cannot reach a project list at all. This is the largest gap that
+  remains between the two clients.
 - No sharing, no second account, no push, no comments, no attachments.
 - No passkeys. One device token guards everything, and the browser keeps it in
   a cookie.
@@ -200,6 +209,10 @@ public entry point.*
 runs at a public address with Litestream replicating, and the Android app ships
 through Obtainium with a signed release. Since then the phone gained a task
 detail screen, and both clients gained multi-select with five bulk actions.*
+
+*Updated 2026-08-28. The macOS shell (M5) is built, so capture from the keyboard
+no longer needs a launcher script. `contrib/macos/` still works and is still the
+answer for a machine with no shell installed.*
 
 1. **Views on the phone.** The binding already exposes `CompileFilter`, so the
    phone can run the same filter grammar as the server and the browser. It needs

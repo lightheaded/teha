@@ -50,8 +50,10 @@ MCP server that an agent can drive for a whole session.
 ## Status
 
 Proof of concept. The server, the sync engine, the filter language, the web app
-and the MCP server run. The Android app, the macOS app, sharing and push do not
-exist yet. Read [docs/PLAN.md](docs/PLAN.md) for the phased plan and
+and the MCP server run. The macOS shell now ships as well: a global quick add,
+a menu bar icon and the `teha://` scheme, around the same web app. The
+Android app, sharing and push do not exist yet. Read
+[docs/PLAN.md](docs/PLAN.md) for the phased plan and
 [docs/POC.md](docs/POC.md) for what this build proves and what it does not.
 
 ## Run it
@@ -110,6 +112,10 @@ Apache-2.0, the shared contract every client links:
   quickadd          the quick add parser
   mobile            the gomobile binding for Android and iOS
   parser-fixtures   the shared corpus, one contract for every client
+
+Apache-2.0, the clients:
+
+  desktop           the macOS shell: quick add, the menu bar, teha://
 
 AGPL-3.0-or-later, the server:
 

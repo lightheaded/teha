@@ -5,7 +5,7 @@ teha uses two licences on purpose. The table says which applies where.
 | Tree | Licence | SPDX |
 |---|---|---|
 | `internal/api`, `internal/store`, `internal/mcpsrv`, `internal/webui`, `internal/todoist`, `cmd/teha` | GNU Affero General Public License v3.0 or later | `AGPL-3.0-or-later` |
-| `id`, `filter`, `recur`, `quickadd`, `mobile`, `parser-fixtures`, `android` | Apache License 2.0 | `Apache-2.0` |
+| `id`, `filter`, `recur`, `quickadd`, `mobile`, `parser-fixtures`, `android`, `desktop` | Apache License 2.0 | `Apache-2.0` |
 
 Full texts: [LICENSE](LICENSE) and [LICENSE.Apache-2.0](LICENSE.Apache-2.0).
 Every source file carries an `SPDX-License-Identifier` line. That line is the
@@ -33,7 +33,11 @@ Five packages define the shared contract between every client:
 
 The Android app in `android/` carries the same licence, for the same reason. It
 is a client, it links the packages above, and it has to reach an app store one
-day. A native iOS client will join it there.
+day. A native iOS client will join it there. The desktop shell in `desktop/` is
+a client as well: it talks to the server over HTTP, it links no server code, and
+the Mac App Store carries the same redistribution limits as the iOS one. The web
+app that the shell hosts stays AGPL-3.0-or-later, because the server serves it
+and the shell never copies it in.
 
 A native client links these packages. Apple adds redistribution limits to the
 App Store that the GPL family forbids. That conflict removed VLC from the store

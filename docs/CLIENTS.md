@@ -1,6 +1,7 @@
 # Clients
 
-This page covers the command line client, the macOS hotkey and the MCP server.
+This page covers the command line client, the macOS hotkey, the macOS desktop
+app and the MCP server.
 The web app needs no setup: open the server address in a browser.
 
 Every example uses the default address `http://127.0.0.1:8637`.
@@ -179,6 +180,56 @@ The short version with Apple Shortcuts: **Ask for Input**, then **Run Shell
 Script** with `/usr/local/bin/teha add "$1"` and input passed as arguments,
 then **Add Keyboard Shortcut** in the shortcut details. A shell script from
 Shortcuts starts with a short `PATH`, so give the binary an absolute path.
+
+## The macOS desktop app
+
+`desktop/` holds a Tauri v2 shell around the same web app. It adds four things
+to a browser tab: a global quick add, a menu bar icon, the `teha://` URL scheme
+and one place for the server address. It holds no second copy of the web app
+and no second quick add parser.
+
+Build it from the root of the repository. `desktop/README.md` lists what you
+need installed, and `make desktop` says what is missing before it starts.
+
+```sh
+make desktop         # the .app and the .dmg, unsigned
+```
+
+Move `teha.app` into `/Applications` and open it once. The shell asks for the
+server address and the device token, then opens the app.
+
+- The address and the shortcut go into a JSON file with mode 600.
+- **The token goes into the keychain**, never into a file. See
+  [DECISIONS.md](DECISIONS.md) D-009.
+
+| Where | What it does |
+|---|---|
+| `CmdOrCtrl+Shift+A` | Opens the quick add panel over every application |
+| `Enter` in the panel | Adds the task and closes the panel |
+| `Escape` in the panel | Closes the panel and adds nothing |
+| The menu bar icon | Quick add, open the app, settings, quit |
+| **Settings** | Changes the address, the token and the shortcut |
+
+The panel takes the same line as `teha add`. It gives the keyboard back to the
+application you came from when it closes.
+
+### The `teha://` URL scheme
+
+```sh
+open "teha://add?text=Book%20the%20ferry%20tomorrow%20at%209:30%20p1%20%23Trip"
+```
+
+One task, with no window on the screen. Percent encoding and `+` for a space
+both work. Bind it in Apple Shortcuts with an **Open URLs** action, in Raycast
+or in Keyboard Maestro.
+
+The URL comes from outside the app, so the shell trusts nothing in it. Only the
+`add` action does anything, the text becomes one line of at most 500
+characters, and the line reaches a text field and never a shell. An unknown
+action writes one line and changes nothing.
+
+The scheme needs the bundled app. `make desktop-dev` runs the shell without a
+bundle, and macOS registers no scheme for it.
 
 ## The MCP server, in Claude Code
 
