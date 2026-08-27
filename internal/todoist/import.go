@@ -49,7 +49,9 @@ type Summary struct {
 	Recurring        int
 	RecurrenceFailed int
 	RecurrenceKept   []string
-	SectionsFolded   int
+	Sections         int
+	SectionsPresent  int
+	SectionsSkipped  int
 	CommentsFolded   int
 	ProjectComments  int
 	Reparented       int
@@ -134,13 +136,23 @@ func Import(st *store.Store, data *Sync, opt Options) (Summary, error) {
 type existing struct {
 	projectByName map[string]string
 	labelByName   map[string]string
-	taskBySource  map[string]string
+	// sectionByKey is keyed by the project id and the lowered name, because a
+	// section name is unique inside one project only. Two projects can both
+	// hold a section called Errands.
+	sectionByKey map[string]string
+	taskBySource map[string]string
+}
+
+// sectionKey builds the key of sectionByKey.
+func sectionKey(projectID, name string) string {
+	return projectID + "\x00" + strings.ToLower(strings.TrimSpace(name))
 }
 
 func readExisting(st *store.Store) (*existing, error) {
 	out := &existing{
 		projectByName: map[string]string{},
 		labelByName:   map[string]string{},
+		sectionByKey:  map[string]string{},
 		taskBySource:  map[string]string{},
 	}
 	if st == nil {
@@ -160,8 +172,16 @@ func readExisting(st *store.Store) (*existing, error) {
 	for _, l := range labels {
 		out.labelByName[strings.ToLower(l.Name)] = l.ID
 	}
-	// The project and label tables carry no source_ref column, so a name is the
-	// only key for them. A task has source_ref, which is the exact key.
+	sections, err := st.Sections()
+	if err != nil {
+		return nil, err
+	}
+	for _, sec := range sections {
+		out.sectionByKey[sectionKey(sec.ProjectID, sec.Name)] = sec.ID
+	}
+	// The project, section and label tables carry no source_ref column, so a
+	// name is the only key for them. A task has source_ref, which is the exact
+	// key.
 	delta, err := st.Pull(0)
 	if err != nil {
 		return nil, err
@@ -183,7 +203,12 @@ func buildCommands(data *Sync, known *existing, sum *Summary) ([]store.Command, 
 	labelCmds := mapLabels(data, known, sum)
 	cmds = append(cmds, labelCmds...)
 
-	taskCmds, err := mapTasks(data, known, sum, projectID)
+	// Sections come before tasks, so a task_add that names a section_id always
+	// finds the row.
+	sectionID, sectionCmds := mapSections(data, known, sum, projectID)
+	cmds = append(cmds, sectionCmds...)
+
+	taskCmds, err := mapTasks(data, known, sum, projectID, sectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -313,15 +338,65 @@ func mapLabels(data *Sync, known *existing, sum *Summary) []store.Command {
 	return cmds
 }
 
-func mapTasks(data *Sync, known *existing, sum *Summary, projectOf map[string]string) ([]store.Command, error) {
-	sections := map[string]string{}
-	for _, s := range data.Sections {
-		if bool(s.IsDeleted) {
+// mapSections returns the Todoist section id to local section id map and the
+// add commands.
+//
+// A section used to become the first line of the description, because the
+// schema had no section table. It is now a row, so the structure of the account
+// survives the import. A section whose project did not arrive, because the
+// project is archived, is skipped and counted: its tasks reach the inbox with
+// no section, which is what the task loop already does with them.
+func mapSections(data *Sync, known *existing, sum *Summary, projectOf map[string]string) (map[string]string, []store.Command) {
+	local := map[string]string{}
+	live := make([]Section, 0, len(data.Sections))
+	for _, sec := range data.Sections {
+		if bool(sec.IsDeleted) || bool(sec.IsArchived) || strings.TrimSpace(sec.Name) == "" {
 			continue
 		}
-		sections[s.ID.String()] = strings.TrimSpace(s.Name)
+		if _, ok := projectOf[sec.ProjectID.String()]; !ok {
+			sum.SectionsSkipped++
+			continue
+		}
+		live = append(live, sec)
 	}
+	// The order key comes from the position in this list, not from the number
+	// that Todoist sends. Todoist leaves section_order at 0 for a whole project,
+	// and two equal keys make the column order of the board depend on the row
+	// id. The name breaks the tie, so a second import produces the same order.
+	sort.SliceStable(live, func(i, j int) bool {
+		if live[i].SectionOrder != live[j].SectionOrder {
+			return live[i].SectionOrder < live[j].SectionOrder
+		}
+		return live[i].Name < live[j].Name
+	})
 
+	var cmds []store.Command
+	seen := map[string]int{}
+	for _, sec := range live {
+		project := projectOf[sec.ProjectID.String()]
+		name := strings.TrimSpace(sec.Name)
+		key := sectionKey(project, name)
+		if reuse, ok := known.sectionByKey[key]; ok {
+			local[sec.ID.String()] = reuse
+			sum.SectionsPresent++
+			continue
+		}
+		newID := id.New("s")
+		local[sec.ID.String()] = newID
+		known.sectionByKey[key] = newID
+		cmds = append(cmds, command("section_add", "import-section-"+sec.ID.String(), store.SectionArgs{
+			ID:        newID,
+			ProjectID: strptr(project),
+			Name:      strptr(name),
+			OrderKey:  strptr(orderKey(seen[project])),
+		}))
+		seen[project]++
+		sum.Sections++
+	}
+	return local, cmds
+}
+
+func mapTasks(data *Sync, known *existing, sum *Summary, projectOf, sectionOf map[string]string) ([]store.Command, error) {
 	comments := map[string][]Note{}
 	for _, n := range data.Notes {
 		if bool(n.IsDeleted) {
@@ -470,18 +545,19 @@ func mapTasks(data *Sync, known *existing, sum *Summary, projectOf map[string]st
 			}
 		}
 
-		section := ""
+		// The section is a row now, so the name stays out of the description.
+		// The pair has to agree: a section_id is only set when the task landed
+		// in the project that owns the section.
 		if it.SectionID != "" {
-			if name, ok := sections[it.SectionID.String()]; ok && name != "" {
-				section = name
-				sum.SectionsFolded++
+			if local, ok := sectionOf[it.SectionID.String()]; ok && project != store.InboxID {
+				args.SectionID = strptr(local)
 			}
 		}
 		notes := comments[key]
 		if len(notes) > 0 {
 			sum.CommentsFolded += len(notes)
 		}
-		desc := foldDescription(it.Description, section, repeat, notes)
+		desc := foldDescription(it.Description, repeat, notes)
 		if desc != "" {
 			args.Description = strptr(desc)
 		}
@@ -567,13 +643,15 @@ func splitDue(d *Due) (string, string) {
 }
 
 // foldDescription puts the parts that our schema cannot hold into the task
-// description: the section name, a repeat rule that did not convert, and the
-// comments.
-func foldDescription(base, section, repeat string, notes []Note) string {
+// description: a repeat rule that did not convert, and the comments.
+//
+// The section name used to go in here as well. It is a real row since the
+// section table arrived, so it does not. A task that an EARLIER import wrote
+// still carries the line "Section: <name>" at the top of its description, and
+// a second import does not clean it: the task matches by source_ref and the
+// importer keeps the row it already has. See docs/USAGE.md section 7.
+func foldDescription(base, repeat string, notes []Note) string {
 	var b strings.Builder
-	if section != "" {
-		b.WriteString("Section: " + section + "\n")
-	}
 	base = strings.TrimRight(base, "\n")
 	if base != "" {
 		b.WriteString(base + "\n")
@@ -617,7 +695,10 @@ func (s Summary) Write(w io.Writer) {
 	} else {
 		fmt.Fprintln(w, "Repeat rules that did not convert: 0.")
 	}
-	fmt.Fprintf(w, "Section names moved into a description: %d.\n", s.SectionsFolded)
+	fmt.Fprintf(w, "Sections: %d new, %d already in the database.\n", s.Sections, s.SectionsPresent)
+	if s.SectionsSkipped > 0 {
+		fmt.Fprintf(w, "Sections whose project did not arrive: %d. Their tasks are in the inbox with no section.\n", s.SectionsSkipped)
+	}
 	fmt.Fprintf(w, "Comments moved into a description: %d.\n", s.CommentsFolded)
 	if s.ProjectComments > 0 {
 		fmt.Fprintf(w, "Project comments have no place in our model, so %d were skipped.\n", s.ProjectComments)

@@ -99,7 +99,8 @@ func TestImportEndToEnd(t *testing.T) {
 		"completed":         1,
 		"recurring":         5,
 		"recurrence failed": 1,
-		"sections folded":   2,
+		"sections":          2,
+		"sections skipped":  1,
 		"comments folded":   1,
 		"project comments":  1,
 		"archived tasks":    7,
@@ -113,7 +114,8 @@ func TestImportEndToEnd(t *testing.T) {
 		"completed":         sum.Completed,
 		"recurring":         sum.Recurring,
 		"recurrence failed": sum.RecurrenceFailed,
-		"sections folded":   sum.SectionsFolded,
+		"sections":          sum.Sections,
+		"sections skipped":  sum.SectionsSkipped,
 		"comments folded":   sum.CommentsFolded,
 		"project comments":  sum.ProjectComments,
 		"archived tasks":    sum.ArchivedTasks,
@@ -188,9 +190,49 @@ func TestImportEndToEnd(t *testing.T) {
 		t.Errorf("the comment did not fold into the description: %q", d)
 	}
 
-	// The section name is the first line of the description.
-	if d := tasks["5004"].Description; !strings.HasPrefix(d, "Section: Errands") {
-		t.Errorf("description of 5004 = %q, want the section on the first line", d)
+	// A Todoist section is a section row now, and the name is out of the
+	// description. Two tasks share the section of the Home project, and one task
+	// of another project has its own section.
+	secs, err := st.Sections()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(secs) != 2 {
+		t.Fatalf("sections = %d, want 2: %+v", len(secs), secs)
+	}
+	bySection := map[string]store.Section{}
+	for _, sec := range secs {
+		bySection[sec.Name] = sec
+	}
+	errands, ok := bySection["Errands"]
+	if !ok {
+		t.Fatalf("the section Errands is missing: %+v", secs)
+	}
+	if errands.ProjectID != byName["Home"].ID {
+		t.Errorf("Errands is in project %q, want Home", errands.ProjectID)
+	}
+	next, ok := bySection["Next actions"]
+	if !ok {
+		t.Fatalf("the section Next actions is missing: %+v", secs)
+	}
+	if next.ProjectID != byName["Work"].ID {
+		t.Errorf("Next actions is in project %q, want Work", next.ProjectID)
+	}
+	for _, source := range []string{"5004", "5005"} {
+		if got := tasks[source].SectionID; got == nil || *got != errands.ID {
+			t.Errorf("section of %s = %v, want the Errands section %q", source, got, errands.ID)
+		}
+	}
+	if got := tasks["5006"].SectionID; got == nil || *got != next.ID {
+		t.Errorf("section of 5006 = %v, want the Next actions section %q", got, next.ID)
+	}
+	if got := tasks["5003"].SectionID; got != nil {
+		t.Errorf("section of 5003 = %v, want none", *got)
+	}
+	for _, source := range []string{"5004", "5005", "5006"} {
+		if d := tasks[source].Description; strings.Contains(d, "Section:") {
+			t.Errorf("description of %s still folds the section name: %q", source, d)
+		}
 	}
 
 	if r := tasks["5003"].RRule; r == nil || *r != "FREQ=WEEKLY;BYDAY=MO" {
@@ -282,6 +324,9 @@ func TestImportEndToEnd(t *testing.T) {
 	if again.Labels != 0 || again.LabelsPresent != 2 {
 		t.Errorf("the second run wrote %d labels and found %d, want 0 and 2", again.Labels, again.LabelsPresent)
 	}
+	if again.Sections != 0 || again.SectionsPresent != 2 {
+		t.Errorf("the second run wrote %d sections and found %d, want 0 and 2", again.Sections, again.SectionsPresent)
+	}
 	if again.Commands != 0 {
 		t.Errorf("the second run built %d commands, want none", again.Commands)
 	}
@@ -303,6 +348,18 @@ func TestImportEndToEnd(t *testing.T) {
 	}
 	if len(labelsAfter) != 2 {
 		t.Errorf("labels after the second run = %d, want 2", len(labelsAfter))
+	}
+	sectionsAfter, err := st.Sections()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sectionsAfter) != 2 {
+		t.Errorf("sections after the second run = %d, want 2", len(sectionsAfter))
+	}
+	for _, sec := range sectionsAfter {
+		if bySection[sec.Name].ID != sec.ID {
+			t.Errorf("the id of the section %q changed, so the second run wrote a copy", sec.Name)
+		}
 	}
 	for source, task := range after {
 		if tasks[source].ID != task.ID {
