@@ -1,0 +1,120 @@
+/* SPDX-License-Identifier: Apache-2.0
+ *
+ * The two local pages of the shell: the quick add panel and the settings
+ * window. The colours are the colours of the web app, so the panel does not
+ * look like a different product. The content security policy allows no inline
+ * style, which is why every rule is here.
+ */
+
+:root {
+  --bg: #f6f7f3;
+  --card: #fff;
+  --ink: #1c221d;
+  --ink-3: #7a827c;
+  --line: #d8dcd2;
+  --accent: #2f6b4f;
+  --bad: #c8412f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #131714;
+    --card: #1b201c;
+    --ink: #e7eae4;
+    --ink-3: #7f877f;
+    --line: #2b322c;
+    --accent: #7fc49b;
+    --bad: #e8705c;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background: var(--bg);
+  font: 15px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+input {
+  width: 100%;
+  font: inherit;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.hint {
+  color: var(--ink-3);
+  font-size: 13px;
+  min-height: 18px;
+}
+
+.bad {
+  color: var(--bad);
+}
+
+/* The panel. A border, because the window has no frame of its own. */
+body.panel {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+body.panel input {
+  font-size: 17px;
+  padding: 12px 14px;
+}
+
+/* The settings window. */
+body.settings {
+  padding: 22px 24px;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+h1 {
+  margin: 0;
+  font-size: 15px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+label {
+  display: grid;
+  gap: 5px;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+button {
+  font: inherit;
+  font-weight: 600;
+  color: var(--bg);
+  background: var(--accent);
+  border: none;
+  border-radius: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  justify-self: start;
+}

@@ -1,0 +1,34 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>teha settings</title>
+<link rel="stylesheet" href="shell.css">
+</head>
+<body class="settings">
+<h1>teha</h1>
+<p>Two things, once. The address goes into a file in your account. The token
+goes into the keychain, and this window never shows it again.</p>
+
+<label>Server address
+  <input id="server" type="url" autocomplete="off" spellcheck="false"
+    placeholder="https://teha.example">
+</label>
+
+<label>Device token
+  <input id="token" type="password" autocomplete="off" spellcheck="false">
+</label>
+
+<label>Quick add shortcut
+  <input id="shortcut" type="text" autocomplete="off" spellcheck="false">
+</label>
+
+<p>A shortcut looks like <code>CmdOrCtrl+Shift+A</code> or <code>Alt+Space</code>.
+A shortcut that the system refuses falls back to the default.</p>
+
+<button id="save" type="button">Save</button>
+<div class="hint" id="note"></div>
+<script src="settings.js"></script>
+</body>
+</html>

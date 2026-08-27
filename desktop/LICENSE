@@ -1,0 +1,11 @@
+This directory is licensed under the Apache License, Version 2.0.
+The full text is in LICENSE.Apache-2.0 at the root of the repository.
+
+SPDX-License-Identifier: Apache-2.0
+
+The rest of the repository is licensed under AGPL-3.0-or-later.
+See LICENSING.md for the reason and for the rule that keeps the two apart.
+
+This tree is a client, like `android`. It talks to the server over HTTP and it
+links no server code. The web app it hosts stays AGPL-3.0-or-later and is
+served by the server, never copied in here.
