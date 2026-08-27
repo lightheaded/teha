@@ -37,6 +37,21 @@ when the work is done or when a decision says it will never happen.
   it, so a credential can be checked against the FIDO metadata service later.
   This build runs no metadata service and asks for no attestation, so the bytes
   would be dead weight. Storing them is a schema addition, not a rewrite.
+- **No CSRF token on the cookie session.** §6.6 asks for one. `SameSite=Lax` on
+  both cookies means a browser sends neither on a cross-site POST, which is the
+  defence that actually runs today. A token in a header is the belt beside that
+  brace, and it belongs with the second account, because that is when a session
+  starts naming who it is.
+- **Without `TEHA_RP_ID` the relying party follows the `Host` header.** A caller
+  that writes any host makes a ceremony pinned to that host. It cannot reach the
+  owner's credentials, because an authenticator releases a passkey for one
+  relying-party id only, and enrolment needs the device token. The result is a
+  row that no real login ever matches, so it is a nuisance and not an entry.
+  DEPLOY.md tells an operator to set both values on a public hostname. A future
+  build can refuse to start when neither is set and the address is not loopback.
+- **A `login/finish` with no ceremony does not count as a failure.** It tests no
+  credential, so it costs an attacker nothing and earns nothing. A flood of them
+  is a request-rate problem, which §6.6 leaves to the public entry point.
 - **No recovery path except the device token.** A lost passkey is recovered by
   signing in with the token and enrolling a new one. There are no recovery
   codes.

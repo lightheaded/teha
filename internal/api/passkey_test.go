@@ -15,6 +15,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -45,6 +47,8 @@ type agent struct {
 	token   string
 	cookies map[string]string
 	last    []*http.Cookie
+	// xff sets X-Forwarded-For, so a test can act as many client addresses.
+	xff string
 }
 
 func newAgent(t *testing.T, ts *httptest.Server) *agent {
@@ -63,6 +67,9 @@ func (a *agent) do(method, path, body string) (int, []byte) {
 	}
 	req.Host = a.host
 	req.Header.Set("Content-Type", "application/json")
+	if a.xff != "" {
+		req.Header.Set("X-Forwarded-For", a.xff)
+	}
 	if a.token != "" {
 		req.Header.Set("Authorization", "Bearer "+a.token)
 	}
@@ -703,6 +710,47 @@ func TestFinishWithoutABeginIsRefused(t *testing.T) {
 	}
 }
 
+// The login page must not say whether the account has a passkey. A begin with
+// nothing enrolled answers exactly like a begin with one enrolled, and neither
+// answer names a credential.
+func TestLoginBeginTellsNothingAboutTheAccount(t *testing.T) {
+	h := newPasskeyHarness(t)
+	a := newAgent(t, h.ts)
+	code, empty := a.do("POST", "/v1/passkeys/login/begin", "{}")
+	if code != http.StatusOK {
+		t.Fatalf("login/begin with no passkey returned %d: %s", code, empty)
+	}
+	if strings.Contains(string(empty), "allowCredentials") {
+		t.Errorf("the answer carries a credential list: %s", empty)
+	}
+
+	h.enrol(t, "Phone")
+	b := newAgent(t, h.ts)
+	code, full := b.do("POST", "/v1/passkeys/login/begin", "{}")
+	if code != http.StatusOK {
+		t.Fatalf("login/begin with a passkey returned %d: %s", code, full)
+	}
+	if strings.Contains(string(full), "allowCredentials") {
+		t.Errorf("the answer carries a credential list: %s", full)
+	}
+	// The two answers differ in the challenge alone, so their shapes match.
+	shape := func(b []byte) string {
+		var out map[string]map[string]any
+		if err := json.Unmarshal(b, &out); err != nil {
+			t.Fatal(err)
+		}
+		keys := []string{}
+		for k := range out["publicKey"] {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		return strings.Join(keys, ",")
+	}
+	if shape(empty) != shape(full) {
+		t.Errorf("the two answers have different shapes: %q and %q", shape(empty), shape(full))
+	}
+}
+
 // --- the lockout -------------------------------------------------------------
 
 func TestRepeatedFailuresLockTheClientOut(t *testing.T) {
@@ -738,6 +786,47 @@ func TestRepeatedFailuresLockTheClientOut(t *testing.T) {
 	// A login that worked clears the counter.
 	if wait := h.srv.lockout(&http.Request{RemoteAddr: "1.2.3.4:1"}); wait != 0 {
 		t.Errorf("the account is still locked for %v", wait)
+	}
+}
+
+// A quiet period forgets the failures. An old attack must not leave the owner
+// at the longest wait for ever.
+func TestAQuietPeriodForgetsTheFailures(t *testing.T) {
+	h := newPasskeyHarness(t)
+	a := h.enrol(t, "Phone")
+	a.token = ""
+	delete(a.cookies, "teha_token")
+	h.auth.origin = "https://evil.example"
+	// One address per attempt, which is the case the account budget exists for.
+	// The per-address counter never fires, so only the account budget can stop
+	// this, and the proxy header is what names each address.
+	h.srv.TrustForwarded = true
+	for i := 0; i < accountFailureAllowance+1; i++ {
+		a.xff = "198.51.100." + strconv.Itoa(i+1)
+		if code, body := h.signIn(t, a, uint32(i+1)); code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d returned %d, want 401: %s", i+1, code, body)
+		}
+	}
+	a.xff = "198.51.100.200"
+	if code, _ := a.do("POST", "/v1/passkeys/login/begin", "{}"); code != http.StatusTooManyRequests {
+		t.Fatalf("a fresh address returned %d, want 429 from the account budget", code)
+	}
+	if wait := h.srv.lockout(&http.Request{RemoteAddr: "9.9.9.9:1"}); wait == 0 {
+		t.Fatal("the account budget did not lock anything")
+	}
+	h.now = h.now.Add(2 * lockoutMax)
+	if wait := h.srv.lockout(&http.Request{RemoteAddr: "9.9.9.9:1"}); wait != 0 {
+		t.Errorf("the account is still locked for %v after a quiet period", wait)
+	}
+	h.srv.sessMu.Lock()
+	n := h.srv.accountFails.n
+	rows := len(h.srv.failures)
+	h.srv.sessMu.Unlock()
+	if n != 0 {
+		t.Errorf("the account counter is %d, want 0", n)
+	}
+	if rows != 0 {
+		t.Errorf("%d address counters survived the quiet period", rows)
 	}
 }
 

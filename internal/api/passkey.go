@@ -108,8 +108,13 @@ type ceremony struct {
 
 // failCount is the lockout state of one client address, or of the account.
 type failCount struct {
-	n     int
+	n int
+	// until is when the lockout ends. A zero value means no lockout yet.
 	until time.Time
+	// last is the time of the newest failure. The sweep reads it, so an
+	// address that stops trying leaves the map instead of holding a row for
+	// ever. Without it an attacker grows this map one row per address.
+	last time.Time
 }
 
 // passkeyRoutes mounts the passkey surface.
@@ -624,11 +629,26 @@ func (s *Server) sweepLocked() {
 			delete(s.sessions, k)
 		}
 	}
+	// A quiet period forgets a failure. Two reasons, and both matter:
+	// an old attack must not leave the owner at the longest wait for ever, and
+	// an unauthenticated caller must not grow this map one row per address.
 	for k, v := range s.failures {
-		if v.n == 0 || (!v.until.IsZero() && now.Sub(v.until) > lockoutMax) {
+		if v.n == 0 || stale(*v, now) {
 			delete(s.failures, k)
 		}
 	}
+	if s.accountFails.n > 0 && stale(s.accountFails, now) {
+		s.accountFails = failCount{}
+	}
+}
+
+// stale reports whether a failure count has aged out: the lockout is over, and
+// the newest failure is older than the longest lockout.
+func stale(f failCount, now time.Time) bool {
+	if f.until.After(now) {
+		return false
+	}
+	return !f.last.IsZero() && now.Sub(f.last) > lockoutMax
 }
 
 // --- the lockout ------------------------------------------------------------
@@ -659,6 +679,7 @@ func (s *Server) lockout(r *http.Request) time.Duration {
 	now := s.Now()
 	s.sessMu.Lock()
 	defer s.sessMu.Unlock()
+	s.sweepLocked()
 	wait := time.Duration(0)
 	if f, ok := s.failures[ip]; ok && f.until.After(now) {
 		wait = f.until.Sub(now)
@@ -686,10 +707,12 @@ func (s *Server) recordFailure(r *http.Request) {
 		s.failures[ip] = f
 	}
 	f.n++
+	f.last = now
 	if d := lockDuration(f.n, ipFailureAllowance); d > 0 {
 		f.until = now.Add(d)
 	}
 	s.accountFails.n++
+	s.accountFails.last = now
 	if d := lockDuration(s.accountFails.n, accountFailureAllowance); d > 0 {
 		s.accountFails.until = now.Add(d)
 	}
