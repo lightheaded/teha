@@ -110,6 +110,13 @@ header .st{margin-left:auto;font-size:12.5px;color:var(--ink-3);font-family:var(
 .d-actions .d-close{margin-left:auto;background:var(--accent);color:var(--accent-ink);border-color:transparent;font-weight:600}
 .d-hint{font-size:12.5px;color:var(--ink-3)}
 kbd{font-family:var(--mono);font-size:12px;background:var(--bg-2);border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+header .cog{background:none;border:1px solid var(--line);border-radius:6px;padding:3px 9px;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);cursor:pointer}
+header .cog:hover{color:var(--ink);border-color:var(--ink-3)}
+.d-err{color:var(--p1);font-size:12.5px;min-height:1.2em}
+.pk{display:flex;align-items:center;gap:10px;font-size:14.5px;color:var(--ink-2)}
+.pk .w{color:var(--ink-3);font-size:12.5px}
+.pk .rm{margin-left:auto;background:none;border:none;color:var(--p1);font-size:12.5px;cursor:pointer;padding:0}
+[hidden]{display:none}
 </style>
 </head>
 <body>
@@ -122,6 +129,7 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--bg-2);border:1px sol
     <header>
       <h2 id="title">Today</h2><span class="n" id="count"></span>
       <span class="st" id="status"></span>
+      <button class="cog" id="cog" title="Settings and passkeys">Settings</button>
     </header>
     <div class="qa">
       <input id="qa" placeholder="Add a task — try: milk tomorrow p1 #Home @store every week" autocomplete="off" spellcheck="false">

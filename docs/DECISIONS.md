@@ -297,3 +297,58 @@ one request, one transaction, and a row nobody named does not move.
 
 **Reverses if:** a batch ever grows past what one request can hold. The answer
 then is paging over ids, not a query inside a command.
+
+---
+
+## D-009 — Passkeys are added beside the device token, and user verification is required
+
+**Date:** 2026-08-27 · **Status:** done
+
+The browser can sign in with a passkey. The device token stays, and it is still
+the only credential an Android client, the command line client and MCP hold. A
+passkey login sets a `teha_session` cookie, which is separate from `teha_token`.
+
+Three rules make the model:
+
+1. **Enrolment sits behind the device token.** `POST /v1/passkeys/register/*`
+   accepts the token and nothing else. The token is therefore the one
+   invitation into this account, which is what PLAN.md §6.6 asks for from
+   invite-only signup, and it adds no new concept. A stolen session cookie
+   cannot grow into a permanent credential.
+2. **User verification is required**, on the registration and on every
+   assertion. A passkey is the whole login on a public hostname, so a stolen
+   unlocked phone must not be an account. The library reports the UV flag and
+   the server refuses an assertion without it.
+3. **A discoverable credential**, so the login asks for no user name. The server
+   sends no credential list to a caller that has not signed in, so the login
+   page tells an attacker nothing about which passkeys exist.
+
+**Why not replace the token.** The token is one string that a phone, a shell and
+an agent all send in one header. WebAuthn needs a browser and a user gesture, so
+it cannot serve any of those three. Two credentials with one account is
+therefore the smallest model that works, and it lets the browser stop pasting a
+32-byte secret.
+
+**Why the counter is a refusal and not a warning.** The library records a clone
+warning when the signature counter does not increase. This build answers 401.
+A replayed assertion and a cloned authenticator both look exactly like that, and
+an account that opens on either one is not protected.
+
+**What the origin rule is.** The relying-party id and the origin come from
+configuration (`TEHA_RP_ID`, `TEHA_ORIGIN`), and from the request host when
+configuration says nothing, so no hostname is in the binary. Both values are
+fixed when a ceremony begins and are read back from the stored ceremony at the
+finish step. A caller that rewrites the `Host` header between the two steps
+therefore fails. The scheme follows the host, because WebAuthn runs in a secure
+context only: https on a real name, http on a loopback name. No forwarded header
+decides it, so a client cannot claim its own scheme.
+
+**Cost.** One direct dependency, `github.com/go-webauthn/webauthn` v0.18.0, and
+about ten indirect ones through it. Sessions live in memory, so a restart signs
+every browser out. A passkey login is one tap, so that is cheap, and it keeps a
+usable bearer secret out of the database. The lockout counters also live in
+memory, so a restart clears them.
+
+**Reverses if:** the second account arrives (M6). Then a session needs an
+account id, enrolment needs an invite that is not the owner's token, and both
+belong in the database rather than in memory.

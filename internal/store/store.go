@@ -48,6 +48,9 @@ func Open(path string) (*Store, error) {
 	if err := s.seedInbox(); err != nil {
 		return nil, err
 	}
+	if err := s.seedOwner(); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 

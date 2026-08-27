@@ -81,3 +81,39 @@ CREATE INDEX IF NOT EXISTS label_by_version   ON label(version);
 -- A plain FTS index, written by the store on every task change. An external
 -- content table needs triggers, and the store already owns every write.
 CREATE VIRTUAL TABLE IF NOT EXISTS task_fts USING fts5(task_id UNINDEXED, title, description);
+
+-- An account, and the passkeys that unlock it. The proof of concept holds one
+-- account, the owner. A second account belongs to milestone M6, so this table
+-- exists to give a credential an owner and not to model sharing.
+CREATE TABLE IF NOT EXISTS account (
+  id           TEXT PRIMARY KEY,
+  user_handle  BLOB NOT NULL,
+  name         TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  created_at   TEXT NOT NULL
+);
+
+-- One row per passkey. The id is the raw credential id in base64url, so a
+-- browser and this table name the same credential with the same string.
+--
+-- A credential carries no version and never enters change_log. A client syncs
+-- tasks, not the keys that unlock the account.
+CREATE TABLE IF NOT EXISTS credential (
+  id                 TEXT PRIMARY KEY,
+  account_id         TEXT NOT NULL REFERENCES account(id) ON DELETE CASCADE,
+  public_key         BLOB NOT NULL,
+  sign_count         INTEGER NOT NULL DEFAULT 0,
+  transports         TEXT NOT NULL DEFAULT '',
+  aaguid             TEXT NOT NULL DEFAULT '',
+  name               TEXT NOT NULL,
+  -- flags holds the authenticator flag byte from registration. The backup
+  -- eligibility bit must not change over the life of a credential, and a
+  -- login cannot check that rule without the value from the first ceremony.
+  flags              INTEGER NOT NULL DEFAULT 0,
+  attestation_type   TEXT NOT NULL DEFAULT '',
+  attestation_format TEXT NOT NULL DEFAULT '',
+  created_at         TEXT NOT NULL,
+  last_used_at       TEXT
+);
+
+CREATE INDEX IF NOT EXISTS credential_by_account ON credential(account_id);

@@ -52,7 +52,11 @@ Phase 1 is solo daily driving with import from Todoist. Phase 2 makes it a house
 
 **Server**
 
-- Accounts with passkeys and a password fallback. Invite-only signup.
+- Accounts with passkeys and a password fallback. Invite-only signup. **Built,
+  with one change:** the fallback is the device token, not a password. The token
+  already exists for the phone, the shell and MCP, so a third secret with its
+  own Argon2id parameters would buy nothing. Enrolment sits behind the token,
+  which is what makes signup invite-only. See [DECISIONS.md](DECISIONS.md) D-009.
 - Data model: projects (nested), sections, tasks (nested), labels, filters, comments (text only), reminders (schema only), completed history, activity log.
 - Sync endpoint: `POST /v1/sync` with `since` version and a command batch. Version counter per account. Client UUIDs and temp ids. Last-write-wins per field. Fractional index for order.
 - Filter language, evaluated in SQL. Todoist's grammar, so imported filters keep working: `#project`, `##project` (with sub-projects), `/section`, `%label` with `@label` as an accepted alias (Todoist retires `@` in filters through 2026), `p1`..`p4`, `today`, `tomorrow`, `overdue`, `no date`, `no time`, `date before:`, `date after:`, `deadline:`, `created:`, `recurring`, `subtask`, `assigned to:`, `search:`, `*` wildcards, `\` escape, `&`, `|`, `!`, parentheses, and `,` for several lists in one saved filter.
@@ -148,7 +152,7 @@ Phase 1 is solo daily driving with import from Todoist. Phase 2 makes it a house
 
 | Layer | Choice | Why |
 |---|---|---|
-| Server | Go, `modernc.org/sqlite` v1.57.0, `embed.FS` for the web build, MCP Go SDK v1.7.0, `rrule-go` v1.8.2, `go-webauthn` v0.17.4 | Single static binary, 15 to 40 MB idle, one 25 MB image. Go is already in use in a sibling project. The MCP SDK is official. Versions read 2026-08-25. |
+| Server | Go, `modernc.org/sqlite` v1.57.0, `embed.FS` for the web build, MCP Go SDK v1.7.0, `rrule-go` v1.8.2, `go-webauthn` v0.18.0 | Single static binary, 15 to 40 MB idle, one 25 MB image. Go is already in use in a sibling project. The MCP SDK is official. Versions read 2026-08-25. |
 | Database | SQLite in WAL mode, one file per account in Phase 4, Litestream v0.5.16 to S3-compatible storage | Small, fast, backed up with one process. Multi-tenant later without Postgres. The 0.5 line shipped 2025-09-30 and rebuilt replication on the LTX format. |
 | Web | Svelte 5.56, SvelteKit 2.70, Vite, TypeScript, wa-sqlite in OPFS with an IndexedDB fallback, virtual lists | Small bundle, fast, compiles away. |
 | Android | Kotlin, Jetpack Compose, Room 2.8.4, WorkManager, Ktor, Glance 1.1.1 | Same shape as lugu. Room is KMP-stable since 2.7.0, so an iOS core later is cheap. Glance 1.2 is still a release candidate, so plan on 1.1.1. |
@@ -221,10 +225,10 @@ Auth: a per-device bearer token in Phase 1. Claude Code connects with `claude mc
 ### 6.6 Security on a public hostname
 
 - The service sits behind the public Traefik entrypoint with the existing rate limit and security header middleware. The app must protect itself.
-- Passkeys are the primary login. Password fallback with Argon2id, lockout with exponential backoff per account and per client IP, and a login notification.
+- Passkeys are the primary login. **Built.** The fallback is the device token rather than a password (D-009). The lockout with exponential backoff per account and per client address is built. A login notification is not: nothing sends mail or push yet.
 - The public entry point preserves the client address, so the app reads it from the forwarded header. Trust that header only from the proxy network, otherwise a client spoofs its own address and escapes a ban.
-- Native apps and MCP use per-device tokens: random 256-bit, hashed at rest, named, listed, revocable, optional expiry. The web session is a secure, same-site cookie.
-- Signup is invite-only. Registration endpoints are off unless an invite token is present.
+- Native apps and MCP use per-device tokens: random 256-bit, hashed at rest, named, listed, revocable, optional expiry. **Partly built:** one shared token, in the environment rather than hashed at rest. The web session is a secure, same-site cookie. **Built:** `teha_session`, Secure, HTTP-only, SameSite=Lax, fourteen days.
+- Signup is invite-only. Registration endpoints are off unless an invite token is present. **Built:** the device token is the invite, so `POST /v1/passkeys/register/*` answers 401 without it.
 - CSRF on the cookie session, strict CSP, no third-party scripts, no external fonts in the app.
 - Attachments are stored on disk under the account, served with a signed URL, scanned for size and type. No SVG uploads.
 - Audit: every login, token creation and failed attempt goes into `activity` and is visible in the UI.
@@ -256,7 +260,7 @@ Auth: a per-device bearer token in Phase 1. Claude Code connects with `claude mc
 | Milestone | Content | Exit test | State |
 |---|---|---|---|
 | M0 Bootstrap | Name, repository, licence, CI, plan | First signed commit, green CI | Name chosen (teha). CI written. Licence and the first commit are open. |
-| M1 Core server | Schema, sync, filters, recurrence, export, import | Todoist account imports with zero loss. Property test converges. | Schema, sync, filters, recurrence and export run and carry tests. Import and the property test are open. |
+| M1 Core server | Schema, sync, filters, recurrence, export, import | Todoist account imports with zero loss. Property test converges. | Schema, sync, filters, recurrence, export, import and the property test run and carry tests. Accounts: passkeys ship for the browser beside the device token, per [DECISIONS.md](DECISIONS.md) D-009. The password fallback is not built, because the token already is one. |
 | M2 Web | Views, quick add, keyboard, offline, PWA | Author uses the web app for one week without Todoist | Views, quick add, the task detail, the keyboard, offline and the service worker run. The week has not started. |
 | M3 MCP | Tools, token auth, Claude Code config | An agent plans the day in three calls, never times out | Eight tools, stateless transport, token auth. `plan_day` answers in one call and 114 tokens. |
 | M4 Android | Offline core, tile, share, gestures, Obtainium | Author uninstalls Todoist from the phone | Not started. |
@@ -351,7 +355,7 @@ Settled by research on 2026-08-25:
 - Todoist request limits: 1 000 partial-sync and 100 full-sync requests per 15 minutes per user, 100 commands per request, 1 MiB body, 15 second timeout.
 - Todoist filters now use `%label`, not `@label`. The free plan is called Beginner.
 - The MCP specification revision to build against is 2026-07-28, and it is stateless.
-- Versions to pin: `modernc.org/sqlite` v1.57.0, Litestream v0.5.16, Room 2.8.4, Glance 1.1.1, Tauri v2.11.5, MCP Go SDK v1.7.0, Svelte 5.56.
+- Versions to pin: `modernc.org/sqlite` v1.57.0, `github.com/go-webauthn/webauthn` v0.18.0, Litestream v0.5.16, Room 2.8.4, Glance 1.1.1, Tauri v2.11.5, MCP Go SDK v1.7.0, Svelte 5.56.
 - The public entry point preserves the client address, so per-IP lockout works.
 - `rrule-go` is the only serious Go RRULE library, and it is stale. The build wraps it.
 - No existing open-source project fits. Vikunja comes closest and has no tile, no strong parser and no official MCP server.

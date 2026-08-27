@@ -3,6 +3,11 @@
 This page covers the command line client, the macOS hotkey and the MCP server.
 The web app needs no setup: open the server address in a browser.
 
+Every client on this page uses the device token. Passkeys are for the browser
+only: WebAuthn needs a browser and a person's gesture, so a shell and an agent
+cannot use one. The token is therefore not going away. Read
+[USAGE.md](USAGE.md#passkeys) for the browser side.
+
 Every example uses the default address `http://127.0.0.1:8637`.
 
 ## Install

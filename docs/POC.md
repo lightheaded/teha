@@ -17,7 +17,7 @@ is one file plus one SQLite database.
 | Measure | Result |
 |---|---|
 | Binary, macOS arm64, unstripped | 18 MB |
-| Dependencies | 5 direct: SQLite driver, MCP SDK, RRULE, UUID, standard library |
+| Dependencies | 6 direct: SQLite driver, MCP SDK, RRULE, UUID, WebAuthn, standard library |
 | Database with 10 011 tasks | 3.6 MB, plus a write-ahead log |
 
 The SQLite driver is pure Go, so `CGO_ENABLED=0` produces a static binary and
@@ -154,6 +154,32 @@ The Go parser and the web parser both run the corpus in
 | Cluster | A kustomize example with one replica, a volume and both probes. No hostname anywhere |
 | CI | GitHub Actions: build, vet, gofmt, Go tests, the parser tests, then the image |
 
+## 8. A login the browser can do with a fingerprint
+
+*Added 2026-08-27.*
+
+WebAuthn with `github.com/go-webauthn/webauthn` v0.18.0, as an addition to the
+device token and not a replacement. The token is one string that a phone, a
+shell and an agent send in one header, and WebAuthn cannot serve any of the
+three.
+
+| Rule | What the server does |
+|---|---|
+| Enrolment | Behind the device token only. The token is the invite, so signup stays invite-only. A passkey session cannot enrol a second passkey. |
+| User verification | Required, on the registration and on every assertion. A stolen unlocked phone must not be an account. |
+| Discoverable credential | The login asks for no user name, and the server sends no credential list to a caller that has not signed in. |
+| Origin and relying party | From `TEHA_RP_ID` and `TEHA_ORIGIN`, else from the request host. Both are pinned when a ceremony begins and read back at the finish step. |
+| Signature counter | A counter that does not increase is a 401, not a warning. |
+| Session | `teha_session`, separate from `teha_token`. Secure, HTTP-only, SameSite=Lax, fourteen days, with a logout route. |
+| Lockout | Per client address and per account. The wait doubles above the allowance, up to fifteen minutes. |
+
+Twenty-six Go cases cover it, and ten of them are refusals: a wrong origin, a
+host rewritten between the two steps, a replayed counter, a lower counter, an
+unknown credential id, a signature from another key, a wrong challenge, an
+unknown user handle, an assertion with no user verification, and a registration
+without the token. A software authenticator in the test signs real bytes, so
+every check runs against a real ceremony rather than a mock.
+
 ## What this build does not have
 
 *Updated 2026-08-26. The Android app now ships, and the server runs behind the
@@ -164,8 +190,9 @@ public entry point.*
   plus one per project, so the phone cannot reach a project list at all. This is
   the largest gap that remains between the two clients.
 - No sharing, no second account, no push, no comments, no attachments.
-- No passkeys. One device token guards everything, and the browser keeps it in
-  a cookie.
+- No password fallback and no second factor beyond the passkey itself. The
+  browser now signs in with a passkey, and the device token is the fallback and
+  the credential every native client uses.
 - No sections, no board layout, no calendar layout.
 - Litestream replicates the cluster database and reports a matching transaction
   id, but nobody has rehearsed a restore from those files.
@@ -207,9 +234,11 @@ detail screen, and both clients gained multi-select with five bulk actions.*
    holds the same rows under different names.
 2. **Rehearse a restore** from the Litestream replica into an empty volume, and
    write down the steps that worked.
-3. **Passkeys, then the second account.** The partner cannot use the app at all
-   until an account exists that is not the owner's device token. This is what
-   unlocks the household milestone.
+3. **The second account.** Passkeys ship: the browser signs in with a
+   fingerprint, a face or a PIN, and the device token stays for the phone, the
+   shell and MCP. The partner still cannot use the app, because one account and
+   one user handle is all the server holds. Sharing, an invite that is not the
+   owner's token, and a session row per account are the household milestone.
 4. **Reminders and notifications.** Web Push with VAPID, per D-003.
 5. **Sections and a board layout.** The importer folds a Todoist section name
    into the description today, because there is no section table.
