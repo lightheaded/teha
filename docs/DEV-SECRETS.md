@@ -174,15 +174,11 @@ umask 077 && scripts/secret device_token > ~/.config/teha/token
 
 ## The cluster keeps its own copy
 
-The server in the cluster reads `TEHA_TOKEN` and both VAPID keys from
-`the encrypted store of the cluster` in the private repository, encrypted
-to the master age key of that store. Nothing on this page reaches a container image or a
-repository.
+The server in the cluster reads `TEHA_TOKEN` and both VAPID keys from its own
+encrypted store. That store is **managed outside this repository**, and nothing
+on this page reaches a container image or a repository.
 
-To read a cluster secret, or to run `kubectl`, use the private repository:
+A self-hoster supplies the same values in whatever way the deployment allows: a
+Kubernetes Secret, a Docker secret, or the environment of the process. Read
+[DEPLOY.md](DEPLOY.md) for the variable names that the server expects.
 
-```sh
-cd the private repository
-sops -d the encrypted store of the cluster
-kubectl -n teha get pods
-```
