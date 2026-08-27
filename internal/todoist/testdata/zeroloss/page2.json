@@ -1,0 +1,40 @@
+{
+  "sync_token": "zeroloss-page-2",
+  "full_sync": true,
+  "next_cursor": "",
+  "has_more": false,
+  "projects": [],
+  "labels": [],
+  "sections": [],
+  "items": [
+    {"id": "600021", "project_id": "300001", "parent_id": null, "section_id": null, "content": "   ", "description": "A row with no title at all.", "priority": 1, "child_order": 1, "labels": [], "due": null, "checked": false, "is_deleted": false, "added_at": "2026-08-20T10:05:00Z"},
+    {"id": "600022", "project_id": "300010", "parent_id": null, "section_id": null, "content": "🚗 rehvivahetus שירות", "description": "", "priority": 1, "child_order": 2, "labels": [], "due": null, "checked": false, "is_deleted": false, "added_at": "2026-08-20T10:06:00Z"},
+    {"id": "600023", "project_id": "300010", "parent_id": null, "section_id": null, "content": "Change the smoke alarm battery", "description": "", "priority": 2, "child_order": 3, "labels": [], "due": {"date": "2026-08-18", "timezone": null, "string": "18 aug", "lang": "en", "is_recurring": false}, "checked": true, "completed_at": "2026-08-18T19:00:00Z", "is_deleted": false, "added_at": "2026-08-10T10:00:00Z"},
+    {"id": "600024", "project_id": "300010", "parent_id": null, "section_id": null, "content": "Clean the drain", "description": "", "priority": 3, "child_order": 4, "labels": [], "due": {"date": "2026-09-04", "timezone": null, "string": "every! 3 weeks", "lang": "en", "is_recurring": true}, "checked": false, "is_deleted": false, "added_at": "2026-08-20T10:07:00Z"},
+    {"id": "600025", "project_id": "300010", "parent_id": null, "section_id": null, "content": "Water the herbs", "description": "", "priority": 4, "child_order": 5, "labels": ["õues"], "due": {"date": "2026-08-24", "timezone": null, "string": "every! 2 days", "lang": "en", "is_recurring": true}, "checked": true, "completed_at": "2026-08-24T07:00:00Z", "is_deleted": false, "added_at": "2026-08-01T10:00:00Z"},
+    {"id": "600026", "project_id": "300020", "parent_id": null, "section_id": null, "content": "Call the ferry line", "description": "", "priority": 4, "child_order": 2, "labels": ["phone"], "due": {"date": "2026-09-10T05:30:00Z", "timezone": "Pacific/Auckland", "string": "10 sep at 17:30", "lang": "en", "is_recurring": false}, "checked": false, "is_deleted": false, "added_at": "2026-08-20T10:08:00Z"},
+    {"id": "600027", "project_id": "300030", "parent_id": null, "section_id": null, "content": "A task in a project that was deleted", "description": "", "priority": 1, "child_order": 1, "labels": [], "due": null, "checked": false, "is_deleted": false, "added_at": "2026-08-20T10:09:00Z"},
+    {"id": "600028", "project_id": "300099", "parent_id": null, "section_id": null, "content": "A task in a project that the payload never sent", "description": "", "priority": 1, "child_order": 2, "labels": [], "due": null, "checked": false, "is_deleted": false, "added_at": "2026-08-20T10:10:00Z"},
+    {"id": "600029", "project_id": "300040", "parent_id": null, "section_id": null, "content": "A task in the archived project", "description": "", "priority": 1, "child_order": 1, "labels": [], "due": null, "checked": false, "is_deleted": false, "added_at": "2026-08-20T10:11:00Z"},
+    {"id": "600030", "project_id": "300010", "parent_id": "600098", "section_id": null, "content": "A sub-task whose parent never arrived", "description": "", "priority": 1, "child_order": 6, "labels": [], "due": null, "checked": false, "is_deleted": false, "added_at": "2026-08-20T10:12:00Z"},
+    {"id": "600031", "project_id": "300012", "parent_id": null, "section_id": null, "content": "Label the shelf boxes", "description": "", "priority": 1, "child_order": 1, "labels": [], "due": {"date": "2026-09-20", "timezone": null, "string": "every 2 weeks", "lang": "en", "is_recurring": true}, "checked": false, "is_deleted": false, "added_at": "2026-08-20T10:13:00Z"}
+  ],
+  "notes": [
+    {"id": "700010", "item_id": "600010", "project_id": "300011", "content": "The bolts are in the blue box.", "posted_at": "2026-08-21T09:00:00Z", "is_deleted": false},
+    {"id": "700011", "task_id": "600010", "project_id": "300011", "content": "Book the garage a week ahead.", "posted_at": "2026-08-20T08:00:00Z", "is_deleted": false},
+    {"id": "700012", "item_id": "600020", "project_id": "300020", "content": "Bring two photographs.", "posted_at": "2026-08-22T11:00:00Z", "is_deleted": false},
+    {"id": "700013", "item_id": "600010", "project_id": "300011", "content": "A comment that was deleted.", "posted_at": "2026-08-22T12:00:00Z", "is_deleted": true}
+  ],
+  "project_notes": [
+    {"id": "700020", "project_id": "300010", "content": "This project holds the flat.", "posted_at": "2026-08-21T10:00:00Z", "is_deleted": false}
+  ],
+  "filters": [
+    {"id": "800010", "name": "Two weeks", "query": "14 days & !%errand", "color": "lime", "item_order": 1, "is_favorite": true, "is_deleted": false},
+    {"id": "800011", "name": "Calls", "query": "%phone & !subtask", "color": "blue", "item_order": 2, "is_favorite": false, "is_deleted": false},
+    {"id": "800012", "name": "A filter that was deleted", "query": "today", "color": "grey", "item_order": 3, "is_favorite": false, "is_deleted": true}
+  ],
+  "completed_info": [
+    {"project_id": "300010", "completed_items": 12},
+    {"project_id": "300020", "completed_items": 3}
+  ]
+}

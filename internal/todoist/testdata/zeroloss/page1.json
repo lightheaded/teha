@@ -1,0 +1,37 @@
+{
+  "sync_token": "zeroloss-page-1",
+  "full_sync": true,
+  "next_cursor": "zeroloss-page-2",
+  "has_more": true,
+  "projects": [
+    {"id": "300001", "name": "Inbox", "color": "charcoal", "parent_id": null, "child_order": 0, "inbox_project": true, "is_deleted": false, "is_archived": false},
+    {"id": "300010", "name": "Household", "color": "green", "parent_id": null, "child_order": 1, "is_deleted": false, "is_archived": false},
+    {"id": "300011", "name": "Garage", "color": "grey", "parent_id": "300010", "child_order": 1, "is_deleted": false, "is_archived": false},
+    {"id": "300012", "name": "Garage shelves", "color": "grey", "parent_id": "300011", "child_order": 1, "is_deleted": false, "is_archived": false},
+    {"id": "300020", "name": "Travel", "color": "blue", "parent_id": null, "child_order": 2, "is_deleted": false, "is_archived": false},
+    {"id": "300030", "name": "Retired list", "color": "red", "parent_id": null, "child_order": 3, "is_deleted": true, "is_archived": false},
+    {"id": "300040", "name": "Last winter", "color": "red", "parent_id": null, "child_order": 4, "is_deleted": false, "is_archived": true}
+  ],
+  "labels": [
+    {"id": "500010", "name": "errand", "color": "red", "item_order": 1, "is_deleted": false},
+    {"id": "500011", "name": "phone", "color": "blue", "item_order": 2, "is_deleted": false},
+    {"id": "500012", "name": "õues", "color": "lime", "item_order": 3, "is_deleted": false},
+    {"id": "500013", "name": "a label that was deleted", "color": "grey", "item_order": 4, "is_deleted": true}
+  ],
+  "sections": [
+    {"id": "400010", "name": "Winter", "project_id": "300011", "is_deleted": false, "is_archived": false},
+    {"id": "400020", "name": "Documents", "project_id": "300020", "is_deleted": false, "is_archived": false}
+  ],
+  "items": [
+    {"id": "600010", "project_id": "300011", "parent_id": null, "section_id": "400010", "content": "Sort the winter tyres", "description": "Four of them, and one spare.", "priority": 4, "child_order": 1, "labels": ["errand", "phone", "õues"], "due": {"date": "2026-09-02", "timezone": null, "string": "2 sep", "lang": "en", "is_recurring": false}, "checked": false, "is_deleted": false, "added_at": "2026-08-20T10:00:00Z"},
+    {"id": "600011", "project_id": "300011", "parent_id": "600010", "section_id": "400010", "content": "Find the wheel bolts", "description": "", "priority": 1, "child_order": 1, "labels": [], "due": null, "checked": false, "is_deleted": false, "added_at": "2026-08-20T10:01:00Z"},
+    {"id": "600012", "project_id": "300011", "parent_id": "600011", "section_id": null, "content": "Measure the thread", "description": "", "priority": 1, "child_order": 1, "labels": [], "due": null, "checked": false, "is_deleted": false, "added_at": "2026-08-20T10:02:00Z"},
+    {"id": "600013", "project_id": "300011", "parent_id": "600012", "section_id": null, "content": "Buy a torque wrench", "description": "", "priority": 2, "child_order": 1, "labels": ["errand"], "due": null, "checked": false, "is_deleted": false, "added_at": "2026-08-20T10:03:00Z"},
+    {"id": "600020", "project_id": "300020", "parent_id": null, "section_id": "400020", "content": "Renew the passport", "description": "The old one runs out in the spring.", "priority": 3, "child_order": 1, "labels": [], "due": {"date": "2026-09-15T09:30:00", "timezone": null, "string": "15 sep at 09:30", "lang": "en", "is_recurring": false}, "deadline": {"date": "2026-10-01", "lang": "en"}, "duration": {"amount": 45, "unit": "minute"}, "checked": false, "is_deleted": false, "added_at": "2026-08-20T10:04:00Z"},
+    {"id": "600099", "project_id": "300010", "parent_id": null, "section_id": null, "content": "A task that was deleted", "description": "", "priority": 1, "child_order": 9, "labels": [], "due": null, "checked": false, "is_deleted": true, "added_at": "2026-08-19T10:00:00Z"}
+  ],
+  "notes": [],
+  "project_notes": [],
+  "filters": [],
+  "completed_info": []
+}

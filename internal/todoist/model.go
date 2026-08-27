@@ -180,6 +180,19 @@ func (n Note) Task() ID {
 	return n.TaskID
 }
 
+// Filter is one saved filter. Our schema has no filter table yet, so the
+// importer cannot write one. It reads them anyway and reports every name and
+// every query, because a filter that vanishes without a word is a loss, and
+// zero loss is the exit test of milestone M1.
+type Filter struct {
+	ID        ID     `json:"id"`
+	Name      string `json:"name"`
+	Query     string `json:"query"`
+	Color     string `json:"color"`
+	ItemOrder int    `json:"item_order"`
+	IsDeleted Bool   `json:"is_deleted"`
+}
+
 // CompletedInfo counts the archived tasks of a project. The sync payload
 // carries the counts only, never the archived tasks themselves.
 type CompletedInfo struct {
@@ -199,6 +212,7 @@ type Sync struct {
 	Sections      []Section       `json:"sections"`
 	Notes         []Note          `json:"notes"`
 	ProjectNotes  []Note          `json:"project_notes"`
+	Filters       []Filter        `json:"filters"`
 	CompletedInfo []CompletedInfo `json:"completed_info"`
 	// NextCursor and HasMore appear on the paged reads of API v1. A plain full
 	// sync leaves them empty.
@@ -214,6 +228,7 @@ func (s *Sync) merge(next *Sync) {
 	s.Sections = append(s.Sections, next.Sections...)
 	s.Notes = append(s.Notes, next.Notes...)
 	s.ProjectNotes = append(s.ProjectNotes, next.ProjectNotes...)
+	s.Filters = append(s.Filters, next.Filters...)
 	s.CompletedInfo = append(s.CompletedInfo, next.CompletedInfo...)
 	if next.SyncToken != "" {
 		s.SyncToken = next.SyncToken

@@ -91,6 +91,12 @@ type IDArgs struct {
 
 // Apply runs every command in one transaction and returns the new version.
 // A command whose uuid was seen before is skipped, so a retry is safe.
+//
+// Each command runs inside its own savepoint, so one bad command in a batch
+// leaves nothing behind. Without the savepoint a command that failed halfway
+// kept the rows it had already written: a `task_update` against a missing task
+// created the labels it named, then failed, and the account held a label that
+// nobody asked for. The version also moved for a command that nobody accepted.
 func (s *Store) Apply(cmds []Command) (int64, []Result, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -118,10 +124,22 @@ func (s *Store) Apply(cmds []Command) (int64, []Result, error) {
 			results = append(results, Result{UUID: c.UUID, OK: true})
 			continue
 		}
+		if _, err := tx.Exec(`SAVEPOINT one_command`); err != nil {
+			return 0, nil, err
+		}
 		id, err := applyOne(tx, c, now, today)
 		if err != nil {
+			if _, rerr := tx.Exec(`ROLLBACK TO one_command`); rerr != nil {
+				return 0, nil, rerr
+			}
+			if _, rerr := tx.Exec(`RELEASE one_command`); rerr != nil {
+				return 0, nil, rerr
+			}
 			results = append(results, Result{UUID: c.UUID, Error: err.Error()})
 			continue
+		}
+		if _, err := tx.Exec(`RELEASE one_command`); err != nil {
+			return 0, nil, err
 		}
 		var v int64
 		if err := tx.QueryRow(`SELECT max(version) FROM change_log`).Scan(&v); err != nil {
@@ -294,6 +312,14 @@ func applyOne(tx *sql.Tx, c Command, now, today string) (string, error) {
 		if err := rowSet(tx, "label", a.ID, now, map[string]any{"deleted_at": now}); err != nil {
 			return "", err
 		}
+		// Every task that carries the label moves to a new version too. Pull
+		// hides a deleted label from the label list of a task, so the list of a
+		// task changes while the task row does not. A client pulls with
+		// `version > since`, so without this it never sees the task again and
+		// keeps showing a label that the account deleted.
+		if err := touchTasksWithLabel(tx, a.ID, now); err != nil {
+			return "", err
+		}
 		return a.ID, nil
 	default:
 		return "", fmt.Errorf("unknown command type %q", c.Type)
@@ -464,6 +490,36 @@ func taskComplete(tx *sql.Tx, id, now, today, state string) error {
 
 func taskSet(tx *sql.Tx, id, now string, set map[string]any) error {
 	return rowSet(tx, "task", id, now, set)
+}
+
+// touchTasksWithLabel moves every task that carries one label to a new
+// version, so a pull carries the new label list of the task.
+func touchTasksWithLabel(tx *sql.Tx, labelID, now string) error {
+	rows, err := tx.Query(`SELECT task_id FROM task_label WHERE label_id = ?`, labelID)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	// The pool holds one connection, so the result set closes before the write.
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := touch(tx, "task", id, now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // --- projects and labels ----------------------------------------------------
