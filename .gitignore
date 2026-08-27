@@ -50,3 +50,6 @@ android/local.properties
 # from the plugin list on every build.
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
+
+# Agent worktrees and session state.
+.claude/
