@@ -18,8 +18,14 @@ first build on a machine with Rust writes it. Commit it then.
 **The shell was never compiled.** Every version, plugin name, permission string
 and configuration key was read from the Tauri v2 documentation and from
 crates.io on 2026-08-27, and every Rust file was written to be `rustfmt` clean.
-Nothing was run. The first `make desktop-check` is the first compile, and CI on
-macOS runs the same check.
+No Rust ran. The first `make desktop-check` is the first compile, and CI on
+macOS runs the same check. Expect a first run to report small things: a
+formatting difference that `cargo fmt --all` repairs, or a method that moved
+between Tauri 2.11 releases.
+
+The parts that did run: the JavaScript parses under Node, the contract test with
+the web app passes, the JSON files parse, and `tools/make-icons.py` wrote the
+icons in this tree.
 
 **The panel shows no parse hint.** The web app tells you what it understood
 before you press `Enter`. The panel cannot, because the parser lives in the
@@ -29,16 +35,16 @@ worth it before the shell has been used for a week.
 
 **`panel_submit` reports that the page took the line, not that the task
 exists.** The shell puts the line into the field of the web app and returns.
-The page reports a real failure in its own console. A round trip would need the
-page to answer the shell, and a page from a remote origin has no way to call a
-command on purpose. See `desktop/README.md`.
+The page reports a real failure in its own console. A round trip needs the page
+to answer the shell, and a page from a remote origin reaches no command on
+purpose. See `desktop/README.md`.
 
 **The quick add contract is a DOM contract.** The shell finds the field by the
-id `qa` and waits for it to clear. A rename in `internal/webui/assets/app.js`
-breaks quick add in the shell, and no test catches it. The cheap fix is a small
-hook in the web app, for example `window.teha.quickAdd(line)`, and then the
-shell calls that instead. It needs a change in the AGPL tree, which this change
-did not touch.
+id `qa` and waits for it to clear. `desktop/tools/contract.test.mjs` fails when
+a rename in `internal/webui/assets/app.js` breaks it, so the build reports it
+rather than the shortcut. The real fix is a small hook in the web app, for
+example `window.teha.quickAdd(line)`, and then the shell calls that instead. It
+needs a change in the AGPL tree, which this change did not touch.
 
 **The shortcut in the menu bar label goes stale.** A save in the settings window
 registers the new shortcut at once, and the label reads the new one at the next

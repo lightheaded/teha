@@ -171,7 +171,7 @@ desktop/
   src-tauri/
     Cargo.toml             every version pinned exactly
     tauri.conf.json        the bundle, the CSP and the teha:// scheme
-    capabilities/          who may call what
+    capabilities/          which page can call which command
     icons/                 drawn by tools/make-icons.py
     src/
       main.rs              the plugins, the setup and the URL action
