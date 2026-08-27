@@ -297,3 +297,47 @@ one request, one transaction, and a row nobody named does not move.
 
 **Reverses if:** a batch ever grows past what one request can hold. The answer
 then is paging over ids, not a query inside a command.
+
+## D-009 — The fractional index lives in a shared package, not in the store
+
+**Date:** 2026-08-27 · **Status:** done
+
+§6.1 of [PLAN.md](PLAN.md) promises "a fractional index for order", so that two
+clients that reorder a list at the same time both keep a valid order. No code
+did that. Every write path put the literal `m` into `order_key`: the store, the
+web app, the Android repository. Only the importer computed a key, and it used a
+fixed-width number of the Todoist child order, which cannot take an insertion
+between two neighbours at all.
+
+The property test for §6.1 needed something to test, so the index is now a
+package: `order.Between(left, right)`.
+
+**Why a top-level package and not `internal/store`.** Every client makes an
+order key. A person drags a task on the phone while offline, and the phone has
+to pick a key between two neighbours with no server in reach. D-002 says that
+one implementation serves every client through the gomobile binding, and the
+binding can only bind a package outside `internal/`. The same argument put
+`id`, `filter`, `recur` and `quickadd` outside `internal/`. So `order` joins
+them, and it takes Apache-2.0 per D-001.
+
+**What the package does.** A key is a string of base-62 digits after an implied
+`0.`. The alphabet runs in ASCII order, so a byte comparison of two keys gives
+the same answer as a comparison of the two fractions. SQLite, Room and
+JavaScript all sort the column with no help. One rule holds for every key: a
+key never ends with the lowest digit, so one position is one key.
+
+**The known cost.** The scheme only halves the gap, so a repeated insertion at
+the same point grows the key by about one character for every six insertions.
+Measured: 2 000 insertions into one gap give a key of 401 characters, and 2 000
+appends at the end give 334. The order never breaks and no two keys collide, so
+precision never runs out. Length is the price. [BACKLOG.md](BACKLOG.md) records
+the integer-prefix form of the index, which makes an append cost nothing.
+
+**Consequence.** Three clients still write `m`, so no client uses the package
+yet. `order_key` therefore holds one value for almost every row, and a list
+falls back to the secondary sort keys. Adopting the package is client work, and
+[BACKLOG.md](BACKLOG.md) records it.
+
+**Reverses if:** ordering moves to a server-assigned integer with a rewrite of
+the neighbours. That needs a lock and a fan-out per reorder, which is what a
+fractional index exists to avoid.

@@ -21,7 +21,7 @@ const DefaultEndpoint = "https://api.todoist.com/api/v1/sync"
 // DefaultResourceTypes names every resource that the importer maps. The sync
 // endpoint sends completed_info in the same answer, so the counts of the
 // archived tasks cost no extra request.
-var DefaultResourceTypes = []string{"projects", "items", "labels", "sections", "notes", "completed_info"}
+var DefaultResourceTypes = []string{"projects", "items", "labels", "sections", "notes", "filters", "completed_info"}
 
 // maxPages stops a cursor loop that never ends. A full sync of a personal
 // account answers in one request, so this limit is only a guard.

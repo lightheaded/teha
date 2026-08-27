@@ -52,6 +52,9 @@ type Summary struct {
 	SectionsFolded   int
 	CommentsFolded   int
 	ProjectComments  int
+	FiltersSkipped   int
+	FiltersKept      []string
+	Resumed          int
 	Reparented       int
 	ArchivedTasks    int
 	Commands         int
@@ -135,13 +138,17 @@ type existing struct {
 	projectByName map[string]string
 	labelByName   map[string]string
 	taskBySource  map[string]string
+	// taskRowBySource holds the row itself, so a resume can see what an
+	// interrupted run did not finish.
+	taskRowBySource map[string]store.Task
 }
 
 func readExisting(st *store.Store) (*existing, error) {
 	out := &existing{
-		projectByName: map[string]string{},
-		labelByName:   map[string]string{},
-		taskBySource:  map[string]string{},
+		projectByName:   map[string]string{},
+		labelByName:     map[string]string{},
+		taskBySource:    map[string]string{},
+		taskRowBySource: map[string]store.Task{},
 	}
 	if st == nil {
 		return out, nil
@@ -169,6 +176,7 @@ func readExisting(st *store.Store) (*existing, error) {
 	for _, t := range delta.Tasks {
 		if t.SourceRef != nil && strings.HasPrefix(*t.SourceRef, SourcePrefix) {
 			out.taskBySource[*t.SourceRef] = t.ID
+			out.taskRowBySource[*t.SourceRef] = t
 		}
 	}
 	return out, nil
@@ -188,6 +196,17 @@ func buildCommands(data *Sync, known *existing, sum *Summary) ([]store.Command, 
 		return nil, err
 	}
 	cmds = append(cmds, taskCmds...)
+
+	// A saved filter has no table in our schema, so the importer writes none.
+	// It records every name and every query instead, and the summary prints
+	// them, so a person can type them back in and nothing is lost in silence.
+	for _, f := range data.Filters {
+		if bool(f.IsDeleted) {
+			continue
+		}
+		sum.FiltersSkipped++
+		sum.FiltersKept = append(sum.FiltersKept, strings.TrimSpace(f.Name)+": "+strings.TrimSpace(f.Query))
+	}
 	return cmds, nil
 }
 
@@ -399,6 +418,7 @@ func mapTasks(data *Sync, known *existing, sum *Summary, projectOf map[string]st
 			// import. Keep the id so a sub-task still finds its parent.
 			localID[key] = reuse
 			sum.TasksPresent++
+			cmds = append(cmds, repairCompleted(it, reuse, key, known.taskRowBySource[source], sum)...)
 			continue
 		}
 		newID := id.New("t")
@@ -514,6 +534,41 @@ func mapTasks(data *Sync, known *existing, sum *Summary, projectOf map[string]st
 	return cmds, nil
 }
 
+// repairCompleted finishes a task that an earlier run left half written.
+//
+// A completed task costs two or three commands: task_add, then task_complete,
+// then task_update for the rule of a repeating task. A run that died between
+// them left the task open for ever, because a second run finds the row by its
+// source_ref and skips everything that followed it. The completed state and the
+// repeat rule of a completed repeating task were both lost in silence, and
+// silence is the part that breaks the zero loss promise.
+//
+// The uuids are the same as the first run used, so a command that did apply is
+// a no-op through applied_command. A run over an account that is already whole
+// builds nothing here, so a plain second import still writes zero commands.
+func repairCompleted(it Item, localID, key string, held store.Task, sum *Summary) []store.Command {
+	if !bool(it.Checked) {
+		return nil
+	}
+	var cmds []store.Command
+	if held.State == "open" {
+		cmds = append(cmds, command("task_complete", "import-done-"+key, store.IDArgs{ID: localID}))
+	}
+	if it.Due != nil && bool(it.Due.IsRecurring) && strings.TrimSpace(it.Due.String) != "" {
+		if rec, ok := ConvertRecurrence(it.Due.String); ok && (held.RRule == nil || *held.RRule == "") {
+			args := store.TaskArgs{ID: localID, RRule: strptr(rec.RRule)}
+			if rec.FromCompletion {
+				args.FromComplete = boolptr(true)
+			}
+			cmds = append(cmds, command("task_update", "import-rrule-"+key, args))
+		}
+	}
+	if len(cmds) > 0 {
+		sum.Resumed++
+	}
+	return cmds
+}
+
 // MapPriority turns a Todoist API priority into ours.
 //
 // Todoist sends 4 for the p1 that a user sees and 1 for p4, so the two scales
@@ -621,6 +676,16 @@ func (s Summary) Write(w io.Writer) {
 	fmt.Fprintf(w, "Comments moved into a description: %d.\n", s.CommentsFolded)
 	if s.ProjectComments > 0 {
 		fmt.Fprintf(w, "Project comments have no place in our model, so %d were skipped.\n", s.ProjectComments)
+	}
+	if s.FiltersSkipped > 0 {
+		fmt.Fprintf(w, "Saved filters have no table yet, so %d were not written. "+
+			"Every query is here, and the grammar is the same:\n", s.FiltersSkipped)
+		for _, f := range s.FiltersKept {
+			fmt.Fprintf(w, "  %s\n", f)
+		}
+	}
+	if s.Resumed > 0 {
+		fmt.Fprintf(w, "Rows repaired after an interrupted run: %d.\n", s.Resumed)
 	}
 	if s.Reparented > 0 {
 		fmt.Fprintf(w, "Rows with a missing parent: %d. They went to the top level or to the inbox.\n", s.Reparented)
