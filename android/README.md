@@ -204,7 +204,7 @@ A view is a filter string. `Mobile.compileFilterRoom` turns it into a `WHERE`
 clause with the names of the Room tables, and a `@RawQuery` DAO method runs that
 clause and binds its arguments in order. The compiler is the one the server
 runs: it takes the table and column names as a value, so one grammar reads two
-databases. D-009 in [../docs/DECISIONS.md](../docs/DECISIONS.md) gives the
+databases. D-014 in [../docs/DECISIONS.md](../docs/DECISIONS.md) gives the
 reason, and `filter/schema.go` holds the mapping.
 
 ## Limits

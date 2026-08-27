@@ -300,7 +300,7 @@ then is paging over ids, not a query inside a command.
 
 ---
 
-## D-009 — The filter compiler takes the table and column names as a value
+## D-014 — The filter compiler takes the table and column names as a value
 
 **Date:** 2026-08-27 · **Status:** done
 

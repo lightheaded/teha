@@ -206,7 +206,7 @@ in the top bar, or a swipe from the left edge, opens the list of views:
 The field above that list takes any query, and it shows what the compiler says
 about a query it refuses. The phone calls the Go compiler through the gomobile
 binding, so it reads every term the server reads. It compiles against the local
-column names, which are not the server's. See D-009 in
+column names, which are not the server's. See D-014 in
 [DECISIONS.md](DECISIONS.md).
 
 The one term the phone refuses is `created:`. The local database keeps no

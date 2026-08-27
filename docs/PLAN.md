@@ -185,7 +185,7 @@ Start date, deadline, duration and `wont_do` exist in the schema from Phase 1 ev
 
 ### 6.3 Filter language
 
-One grammar and one fixture corpus. The Go parser compiles a query to a SQL `WHERE` clause with parameters, and it takes the table and column names as a value, so one parser emits the names of the server database and the names of a client store. The Android app therefore calls the same compiler through the gomobile binding (D-002, D-009) and needs no parser of its own. The browser still evaluates a subset in JavaScript over its local rows, which is the one place where a client can drift. The grammar is Todoist's, plus the Phase 3 extensions.
+One grammar and one fixture corpus. The Go parser compiles a query to a SQL `WHERE` clause with parameters, and it takes the table and column names as a value, so one parser emits the names of the server database and the names of a client store. The Android app therefore calls the same compiler through the gomobile binding (D-002, D-014) and needs no parser of its own. The browser still evaluates a subset in JavaScript over its local rows, which is the one place where a client can drift. The grammar is Todoist's, plus the Phase 3 extensions.
 
 ### 6.4 Quick add parser
 
@@ -270,7 +270,7 @@ Auth: a per-device bearer token in Phase 1. Claude Code connects with `claude mc
 Decisions with a lasting consequence live in [DECISIONS.md](DECISIONS.md):
 the licence split (D-001), the Android parser binding (D-002), Web Push
 (D-003), the iOS answer (D-004) and the naming scheme in the filter compiler
-(D-009).
+(D-014).
 
 Three choices in this plan changed when the code met reality. Each one is small, and each one has a reason.
 
