@@ -44,3 +44,9 @@ android/local.properties
 # Signing material never enters the repository.
 *.jks
 *.keystore
+
+# Desktop shell (Tauri)
+# The Rust build output, and the permission schemas that tauri-build writes
+# from the plugin list on every build.
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
