@@ -5,6 +5,12 @@ name: android
 # The paths list therefore names the Android tree and the shared packages that
 # the binding compiles, and nothing else.
 on:
+  # A manual trigger, because a paths filter can miss a push. A force push that
+  # rewrites history changes every path, and GitHub then evaluates the filter
+  # against a commit range it cannot compare, so no build starts and no release
+  # appears. The release of this repository is the Android app, so a missing
+  # build means Obtainium keeps an older version with no sign of why.
+  workflow_dispatch:
   push:
     paths:
       - 'android/**'
