@@ -66,7 +66,6 @@ fn create(
             if let Some(main) = handle.get_webview_window(MAIN) {
                 let _ = main.hide();
             }
-            policy::accessory(&handle);
         }
     });
 
@@ -89,7 +88,7 @@ pub fn window(app: &AppHandle) -> Result<WebviewWindow, String> {
 pub fn show(app: &AppHandle) {
     match window(app) {
         Ok(window) => {
-            policy::regular(app);
+            policy::unhide(app);
             let _ = window.unminimize();
             let _ = window.show();
             let _ = window.set_focus();

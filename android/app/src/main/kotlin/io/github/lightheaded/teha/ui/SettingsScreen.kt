@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -22,6 +23,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -37,6 +39,9 @@ fun SettingsScreen(vm: TehaViewModel, onBack: () -> Unit) {
     var token by remember { mutableStateOf(vm.token) }
     var result by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var code by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf(vm.accountName) }
+    val people by vm.people.collectAsState()
 
     Scaffold(
         topBar = {
@@ -110,6 +115,65 @@ fun SettingsScreen(vm: TehaViewModel, onBack: () -> Unit) {
                     "token. A wrong token fails the second call only.",
                 style = MaterialTheme.typography.bodySmall,
             )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            // The household. Somebody who was invited types the code here, and
+            // the server answers with a device token, so the two fields above
+            // fill themselves in.
+            Text("The household", style = MaterialTheme.typography.titleMedium)
+            if (people.size > 1) {
+                Text(
+                    people.joinToString(", ") { person ->
+                        val marks = listOfNotNull(
+                            if (person.isMe) "you" else null,
+                            if (person.isOwner) "owner" else null,
+                        )
+                        if (marks.isEmpty()) person.name else "${person.name} (${marks.joinToString(", ")})"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            } else {
+                Text(
+                    "Nobody has invited you yet. Type the code they send, and this " +
+                        "phone becomes a second account with its own inbox.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("Your name") },
+                placeholder = { Text("The name the other person sees") },
+            )
+            OutlinedTextField(
+                value = code,
+                onValueChange = { code = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("Invitation code") },
+                supportingText = { Text("The code works once, and it expires.") },
+            )
+            Button(
+                enabled = !busy && code.isNotBlank(),
+                onClick = {
+                    // The address has to be saved first: the join call is the
+                    // one call that carries no token, and it still needs to
+                    // know where to go.
+                    vm.saveSettings(url, token)
+                    busy = true
+                    result = "Joining..."
+                    vm.join(code, name) { line ->
+                        result = line
+                        busy = false
+                        code = ""
+                        token = vm.token
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Join the household") }
         }
     }
 }

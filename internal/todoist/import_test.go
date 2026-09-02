@@ -61,6 +61,20 @@ func openTestStore(t *testing.T) *store.Store {
 }
 
 // bySource indexes the tasks of the store by their Todoist id.
+// commentsOn reads the bodies of the comments of one task, oldest first.
+func commentsOn(t *testing.T, st *store.Store, taskID string) []string {
+	t.Helper()
+	rows, err := st.CommentsFor(taskID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := make([]string, 0, len(rows))
+	for _, c := range rows {
+		out = append(out, c.Body)
+	}
+	return out
+}
+
 func bySource(t *testing.T, st *store.Store) map[string]store.Task {
 	t.Helper()
 	delta, err := st.Pull(0)
@@ -101,7 +115,7 @@ func TestImportEndToEnd(t *testing.T) {
 		"recurrence failed": 1,
 		"sections":          2,
 		"sections skipped":  1,
-		"comments folded":   1,
+		"comments":          1,
 		"project comments":  1,
 		"archived tasks":    7,
 	}
@@ -116,7 +130,7 @@ func TestImportEndToEnd(t *testing.T) {
 		"recurrence failed": sum.RecurrenceFailed,
 		"sections":          sum.Sections,
 		"sections skipped":  sum.SectionsSkipped,
-		"comments folded":   sum.CommentsFolded,
+		"comments":          sum.Comments,
 		"project comments":  sum.ProjectComments,
 		"archived tasks":    sum.ArchivedTasks,
 	}
@@ -185,9 +199,16 @@ func TestImportEndToEnd(t *testing.T) {
 	if got := tasks["5002"].Labels; len(got) != 1 || got[0] != "errand" {
 		t.Errorf("labels of 5002 = %v, want [errand]", got)
 	}
-	if d := tasks["5002"].Description; !strings.Contains(d, "The tap in the kitchen drips.") ||
-		!strings.Contains(d, "Comments:") || !strings.Contains(d, "on the fridge") {
-		t.Errorf("the comment did not fold into the description: %q", d)
+	// A comment is a row now, so the description carries the description and
+	// nothing else, and the comment is on the task.
+	if d := tasks["5002"].Description; !strings.Contains(d, "The tap in the kitchen drips.") {
+		t.Errorf("the description did not arrive: %q", d)
+	}
+	if d := tasks["5002"].Description; strings.Contains(d, "Comments:") {
+		t.Errorf("a comment must not fold into the description any more: %q", d)
+	}
+	if got := commentsOn(t, st, tasks["5002"].ID); len(got) != 1 || !strings.Contains(got[0], "on the fridge") {
+		t.Errorf("the comment did not arrive as a row: %v", got)
 	}
 
 	// A Todoist section is a section row now, and the name is out of the

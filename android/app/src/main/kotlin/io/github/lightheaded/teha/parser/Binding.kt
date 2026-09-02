@@ -41,9 +41,19 @@ object Binding {
      *
      * The result is a WHERE clause only. The caller adds the test for a
      * deleted row and the sort of the view.
+     *
+     * me is the account that is asking, and `assigned to: me` is the one term
+     * that needs it. An empty value makes that term fail with a sentence,
+     * which is right for a phone that has not joined a household.
      */
-    fun compileFilterRoom(query: String, today: String = todayIso()): CompiledFilter =
-        json.decodeFromString(CompiledFilter.serializer(), Mobile.compileFilterRoom(query, today))
+    fun compileFilterRoom(
+        query: String,
+        today: String = todayIso(),
+        me: String = "",
+    ): CompiledFilter = json.decodeFromString(
+        CompiledFilter.serializer(),
+        Mobile.compileFilterRoomFor(query, today, me),
+    )
 
     fun nextRecurrence(rule: String, base: String, today: String, fromCompletion: Boolean): Recurrence =
         json.decodeFromString(

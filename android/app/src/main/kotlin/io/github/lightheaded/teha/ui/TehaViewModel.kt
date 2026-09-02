@@ -9,8 +9,10 @@ import io.github.lightheaded.teha.TehaApp
 import io.github.lightheaded.teha.data.DueChange
 import io.github.lightheaded.teha.data.Edit
 import io.github.lightheaded.teha.data.SyncResult
+import io.github.lightheaded.teha.data.db.AccountEntity
 import io.github.lightheaded.teha.data.db.LabelEntity
 import io.github.lightheaded.teha.data.db.ProjectEntity
+import io.github.lightheaded.teha.data.db.SectionEntity
 import io.github.lightheaded.teha.data.db.TaskEntity
 import io.github.lightheaded.teha.parser.Binding
 import io.github.lightheaded.teha.parser.ParsedLine
@@ -60,6 +62,13 @@ val BUILT_IN_VIEWS = listOf(
 )
 
 /**
+ * ASSIGNED_TO_ME is the eighth view, and it only means something once two
+ * people share a list. The browser adds the same view under the same
+ * condition, so the drawer shows it only when the household has two people.
+ */
+val ASSIGNED_TO_ME = TaskView("assigned to: me", "Assigned to me")
+
+/**
  * projectView is the view of one project.
  *
  * The query is the string a person can also type, so the phone and the browser
@@ -106,7 +115,9 @@ class TehaViewModel(app: Application) : AndroidViewModel(app) {
     val tasks: StateFlow<List<TaskEntity>> =
         combine(_state.map { it.view }.distinctUntilChanged(), today) { view, day -> view to day }
             .flatMapLatest { (view, day) ->
-                val compiled = Binding.compileFilterRoom(view.query, day)
+                // The account is part of the question: `assigned to: me` has no
+                // answer without it.
+                val compiled = Binding.compileFilterRoom(view.query, day, repo.me())
                 // setFilter refuses a bad query before it becomes a view, so
                 // this path is for a view that stopped compiling later. An
                 // empty list is the honest answer, and never a crash.
@@ -128,12 +139,25 @@ class TehaViewModel(app: Application) : AndroidViewModel(app) {
     val labels: StateFlow<List<LabelEntity>> = repo.labels
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    val sections: StateFlow<List<SectionEntity>> = repo.sections
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** The people of the household. One person means a list of one, or none. */
+    val people: StateFlow<List<AccountEntity>> = repo.people
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     init {
         viewModelScope.launch {
             repo.outboxCount.collect { n -> _state.value = _state.value.copy(queued = n) }
         }
-        if (repo.settings.isConfigured) sync()
+        if (repo.settings.isConfigured) {
+            sync()
+            viewModelScope.launch { repo.readHousehold() }
+        }
     }
+
+    /** me is the account this phone is, for a name beside a task. */
+    fun me(): String = repo.me()
 
     // --- the detail screen ---------------------------------------------------
     //
@@ -226,7 +250,7 @@ class TehaViewModel(app: Application) : AndroidViewModel(app) {
             setView(BUILT_IN_VIEWS.last())
             return true
         }
-        val compiled = Binding.compileFilterRoom(query, today.value)
+        val compiled = Binding.compileFilterRoom(query, today.value, repo.me())
         if (compiled.error.isNotEmpty()) {
             _state.value = _state.value.copy(filterError = compiled.error)
             return false
@@ -502,10 +526,43 @@ class TehaViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // --- the household ------------------------------------------------------
+
+    /**
+     * join redeems an invitation code. The phone becomes the second account,
+     * with its own inbox and its own device token.
+     *
+     * The cache goes first, inside the repository: what it holds belongs to
+     * whoever the phone was before.
+     */
+    fun join(code: String, name: String, onResult: (String) -> Unit) {
+        if (code.isBlank()) {
+            onResult("Type the code that was sent to you.")
+            return
+        }
+        _state.value = _state.value.copy(syncing = true)
+        viewModelScope.launch {
+            val line = when (val result = repo.join(code, name)) {
+                is SyncResult.Ok -> {
+                    repo.readHousehold()
+                    "You are in. The account is at version ${result.version}."
+                }
+                is SyncResult.Failed -> result.message
+            }
+            _state.value = _state.value.copy(
+                syncing = false,
+                message = line,
+                configured = repo.settings.isConfigured,
+            )
+            onResult(line)
+        }
+    }
+
     // --- settings -----------------------------------------------------------
 
     val serverUrl: String get() = repo.settings.serverUrl
     val token: String get() = repo.settings.token
+    val accountName: String get() = repo.settings.accountName
 
     fun saveSettings(url: String, token: String) {
         repo.settings.serverUrl = url

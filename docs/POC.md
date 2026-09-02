@@ -3,8 +3,8 @@
 *2026-08-25. Built against [PLAN.md](PLAN.md) milestones M1 to M3, plus the
 Todoist importer, a command line client and the deployment files.*
 
-Tests: 184 Go cases and 29 parser cases pass. `go vet` and `gofmt` are clean,
-and `go test -race ./...` is clean as well.
+Tests: 206 Go cases and 193 web cases pass. `go vet` and `gofmt` are clean, and
+`go test -race ./...` is clean as well.
 
 The plan makes four risky promises. This build tests each one with running code,
 not with a design note.
@@ -91,6 +91,16 @@ dialect adds 49 cases, each one run against a real SQLite database that carries
 the Room column names. Todoist moved filters from `@label` to `%label`, so both
 work here and an imported filter keeps working.
 
+Since 2026-08-31 the claim in the heading is a test rather than a hope.
+`parser-fixtures/filter.json` holds one account of thirteen tasks, six
+projects, two sections, two people and eighty-one queries with one answer
+each. The Go test writes those answers by running the compiled SQL against real
+SQLite, and the web test demands the same answers from the browser evaluator.
+A term that means two things in two clients fails the build. Three terms fail
+on purpose, each with a sentence and never with the wrong rows: a section term
+on the phone, `created:` on the phone and in the browser, and an assignee term
+wherever the store keeps no assignee.
+
 Speed, on 10 011 tasks, for a page of 200 rows:
 
 | Query | Time |
@@ -107,10 +117,10 @@ The transport is Streamable HTTP from specification revision 2026-07-28, in
 stateless mode: no session header, no `initialize` handshake, and `server/discover`
 answers with the supported versions and the server identity.
 
-Eight tools, every write batched:
+Ten tools, every write batched:
 
 `list_tasks` `add_tasks` `update_tasks` `complete_tasks` `list_projects`
-`add_project` `search` `plan_day`
+`add_project` `comments` `add_comment` `search` `plan_day`
 
 | Call | Cost |
 |---|---|
@@ -281,39 +291,158 @@ array. Each send now copies. Nothing about that is visible without `-race`.
 
 The full detail is in [DECISIONS.md](DECISIONS.md) D-010 and D-011.
 
+## 10. Two people in one file
+
+One SQLite file holds the household. A project belongs to one account and is
+shared with none or more others, and every other row hangs off a project, so
+visibility is one question asked in one place.
+
+| The promise | How it is kept | The test |
+|---|---|---|
+| An invitation is not the device token | The owner writes a code with a name on it. The server keeps its hash, shows the code once, and it works for one person and seven days | A used code, a made-up code and an expired code are each refused with the same sentence |
+| Two accounts cannot see each other | Every read names the account, and every write passes a gate that asks which projects the command touches | Each person adds a task; neither pull carries the other's. Seven ways to write into another account's list are each refused |
+| A shared list reaches both | One membership row, and the same visibility rule | The partner sees the milk, ticks it off, and the owner sees the tick |
+| A list stays its owner's | Rename, delete and share are the owner's alone | A member's rename is refused |
+| Losing a share is not silent | The server records the version of every membership change and answers `reset` to a pull from before it | The pull after an unshare asks the client to start again, and the row is gone |
+| A nudge is personal | A reminder and a push subscription carry an account | A reminder on a shared task reaches its owner's devices and nobody else's |
+| An agent sees one account | The MCP server builds one tool set per account, from the token that drove the call | Two tokens, two answers, and no token is a 401 |
+
+Each account has its own inbox, because an inbox is the most private list there
+is. A capture with no project lands in the inbox of the person who typed it,
+and `#inbox` means that one. The full reasoning is in
+[DECISIONS.md](DECISIONS.md) D-016 and D-017.
+
+## 11. A backup that somebody has restored
+
+`scripts/restore-drill.sh` starts MinIO, a server and Litestream in Docker,
+writes through the API, destroys the database file, restores it from the
+replica and compares. It takes about a minute and it removes everything it
+made.
+
+The first run failed, and that is the point of the section. Litestream had
+replicated the database as it stood when it attached and nothing after it, so
+the restore brought back the seed and lost every write. The cause is neither
+Litestream nor the drill: the server holds one long-lived connection, so SQLite
+leaves a write in the write-ahead log, and it moves the log into the file only
+when the log passes about four megabytes. For two people that is days. The
+backup looked healthy the whole time.
+
+The server now checkpoints every ten seconds and once more on a clean stop, so
+a restore can lose at most one interval. The drill passes: the account version
+and every row came back, and the restored file took a new write. It fails
+loudly without the checkpoint, which is what makes it worth keeping. See
+[DECISIONS.md](DECISIONS.md) D-019.
+
+The drill also found that `docs/DEPLOY.md` named a `litestream snapshots`
+command that the 0.5 line does not have. The guide now says `ltx`.
+
+## 12. A conversation on a task, and a notification when it matters
+
+A comment is a row in `comment`: the task, the author, the body, and the three
+stamps with the version counter. It travels in the pull with every other row.
+
+| The promise | How it is kept | The test |
+|---|---|---|
+| Everybody who sees the task sees the talk | A comment hangs off a task, which hangs off a project, so one visibility rule answers | A comment on an unshared list is unreadable to the other account, and readable one line later when the list is shared |
+| A line belongs to whoever said it | `account_id` is the author, and the gate refuses an edit or a delete by anybody else | Both refusals arrive as one sentence, and the author's own edit lands |
+| A query reaches comment text | `comment:` reads the table, in the Go compiler and in the browser evaluator | Five cases in `parser-fixtures/filter.json`, answered by real SQLite and demanded of the browser |
+| A store with no comments says so | `filter.Schema` leaves the table name empty, and the term fails | The phone dialect refuses `comment:` with a sentence |
+| An import keeps a conversation | A Todoist comment becomes a row and keeps its posting time | The zero-loss fixture demands both comments of one task, in order, and no deleted one |
+| Being given a task is worth hearing | `ApplyWithEvents` reports the fact, `internal/push` writes the words | An assignment and a comment reach the other person's devices, and a repeat or a self-assignment sends nothing |
+| Nobody hears about a task they cannot see | The gate refuses an assignment to a person who cannot see the list | Three shapes of that command are refused, and the same command works once the list is shared |
+
+The store reports a fact and never a wording. That is what lets a second
+transport, such as UnifiedPush, send the same events with no copy of the store.
+See [DECISIONS.md](DECISIONS.md) D-020.
+
+## 13. A list that works in a shop
+
+Shopping mode is a layout of a project view, and it needed no table. An aisle
+is a section of the project. The suggestions are the completed tasks of it. The
+aisle of a new item is copied from the newest item of the same name, so `milk`
+lands in Dairy from the second time on.
+
+| The promise from §4 of the plan | What it is |
+|---|---|
+| Items grouped by category, learned from history, editable | Sections as aisles, one lookup by name for the guess, and the **Section** field to move one |
+| Big check targets | A 30-pixel circle in a 50-pixel row, tested at 320 pixels wide |
+| Recently bought suggestions | The completed items of the list, newest first, one per name, that are not on the list now |
+| A quantity in the title | `2x milk` draws the count as a chip and keeps the title as typed |
+| Live sync while two people are in the store | The event stream wakes a pull, and the pull redraws. Nothing was added for this |
+| Checked items collapse and clear on request | The basket holds this trip, twelve hours, and a button empties it |
+| It must work in split screen | `scripts/screenshots.mjs` fails the build if the layout scrolls sideways or a target shrinks at 320 pixels |
+
+The one thing the plan asks for and this does not do is a drag from one aisle
+to another. See [DECISIONS.md](DECISIONS.md) D-021.
+
+## 14. A local copy that can hold a decade
+
+The web app kept its whole state in one `localStorage` string: five megabytes
+of quota, rewritten on every keystroke. That was the last known shortcut in the
+web app.
+
+It now keeps one IndexedDB object store per table, keyed by the row id, plus one
+small record for the sync watermark, the outbox and how the browser is
+arranged. A write marks one row and a timer writes the batch, so a change costs
+one row and not the whole account.
+
+| The promise | How it is kept | The test |
+|---|---|---|
+| One tick of the app is one write | Every local edit passes one function, which reads the table from the command type | Three rows and the device record land in one transaction |
+| An unsent command survives everything | The outbox is written with the same call, and it is never dropped | The move off `localStorage` keeps it, and so does a refused write |
+| A device that used the old string keeps its account | The string moves once, at the next start, and the old key is removed | Two copies on one device is what the move exists to prevent, and the test demands the removal |
+| A browser with no IndexedDB still works | The fallback keeps the old single string behind the same interface | Both backends round-trip a row and a delete |
+| The real binding works | Node has no IndexedDB, so a real browser proves it | The screenshot job reads the object stores and fails if the rows or the watermark are missing |
+
+This is a change of plan, which named wa-sqlite in OPFS. The browser has no use
+for a query engine: the renderer walks the rows and the filter evaluator does
+too. See [DECISIONS.md](DECISIONS.md) D-022.
+
 ## What this build does not have
 
-*Updated 2026-08-27. The Android app now ships, it reaches the views of the
-browser, and the server runs behind the public entry point.*
+*Updated 2026-09-02, with the comments, shopping mode, the notifications, the
+IndexedDB copy and the phone in the household.*
 
-- No widget, and no signature on the macOS app. The desktop shell now ships: it
-  hosts the web app, a global shortcut opens a quick add panel over every
-  application, a menu bar icon carries the menu, and `teha://add?text=` adds a
-  task from Shortcuts, Raycast or Keyboard Maestro. The build is unsigned, per
-  the Phase 4 decision about identity, and the panel shows no parse hint before
-  `Enter`, because the parser is in the page.
+- No widget, and no signature on the macOS app. The desktop shell hosts the web
+  app, a global shortcut opens a quick add panel over every application, a menu
+  bar icon carries the menu, and `teha://add?text=` adds a task from Shortcuts,
+  Raycast or Keyboard Maestro. The build is unsigned, per the Phase 4 decision
+  about identity, and the panel shows no parse hint before `Enter`, because the
+  parser is in the page.
 - The Android app has a quick settings tile, the six built-in views of the
   browser, one view per project, and a field that takes any query the filter
-  grammar knows. It has no notification and no background sync.
-- No sharing, no second account, no comments, no attachments.
-- Push works in the browser and in the installed web app, and nowhere else.
-  The Android app fires its own local reminders from Room, which needs no
-  subscription. A comment or an assignment sends no notification, because there
-  is no second account to send one to.
-- No password fallback and no second factor beyond the passkey itself. The
-  browser now signs in with a passkey, and the device token is the fallback and
-  the credential every native client uses.
-- No calendar layout. Sections and the board layout now ship: a project view
-  draws its sections as columns, and the importer writes a section row instead
-  of a line of the description. A task that an earlier import wrote still
-  carries that line, and a re-import does not clean it.
-- The phone holds no section table, so a `/section` or a `no section` term fails
-  there with a sentence instead of compiling.
-- Litestream replicates the cluster database and reports a matching transaction
-  id, but nobody has rehearsed a restore from those files.
-- The web app stores its state in `localStorage`, not in OPFS with SQLite. That
-  is fine for thousands of tasks and needs replacing before it holds a decade of
-  history.
+  grammar knows. It joins a household, assigns a task, files one under a
+  heading and acts on `reset`. It has no notification, no background sync, no
+  comments and no shopping layout, and it cannot write an invitation or share a
+  list: both are the owner's jobs and both are in the browser.
+- No attachment. A comment is a row with an author, and only the author changes
+  it. A file has nowhere to go: no part of this build stores one.
+- Shopping mode runs in the browser, not on the phone. An aisle is a section of
+  the project and the suggestions come from what the list has held, so it
+  needed no table.
+- Push works in the browser and in the installed web app, and nowhere else. A
+  reminder and a push subscription belong to one person, so two people who
+  share a chore each keep their own nudge. A task given to somebody, and a
+  comment on a task they can see, both notify them. Neither is retried: an
+  event is sent and forgotten.
+- No second factor beyond the passkey itself. The browser signs in with a
+  passkey, with an invitation code, or with the device token, and each account
+  has a token of its own.
+- The web app draws a calendar of the current view, as a month or as a week,
+  with drag to reschedule. It has no hour grid, so a task with a time sorts to
+  the top of its day rather than sitting at its hour.
+- The phone holds no comment table, so `comment:` fails there with a sentence
+  instead of compiling. It holds the sections and the people now, so `/section`,
+  `no section` and every `assigned` term answer there.
+- The browser holds no creation date, so `created:` fails there in the same way
+  and for the same reason. Every other term of the grammar answers the same in
+  the browser, on the phone and on the server, and
+  `parser-fixtures/filter.json` proves it.
+- The web app holds no query engine. Its rows are in IndexedDB and every filter
+  is a walk over them in memory, which is fine for thousands of tasks. The
+  `localStorage` shortcut is gone.
+- The full-text index holds no comment text, so `search:` and `comment:` mean
+  two different things.
 
 ## Bugs found and fixed while building
 
@@ -367,30 +496,66 @@ browser, and the server runs behind the public entry point.*
     every query the way it already does for a project comment. A gap a person
     can see is not a loss.
 
+11. **The backup replicated a stale file.** Litestream copies the database
+    file, and one long-lived connection leaves every write in the write-ahead
+    log for days. A restore brought back the seed and nothing else, while the
+    replica reported a healthy transaction id. The server now checkpoints on a
+    timer. Found by the first run of `scripts/restore-drill.sh`.
+12. **A reschedule left the reminder behind.** Only the detail sheet moved a
+    reminder when the due date moved. The `t`, `m` and `w` keys, the bulk
+    reschedule, the overdue sweep and the new calendar drag all wrote a new due
+    date and left the reminder pointing at the old moment, so it fired at a
+    time that meant nothing or had already passed. Every path that writes a due
+    date now goes through one function, and that function re-arms.
+
+13. **The MCP search reached across the household.** Every other read was
+    scoped to the account that asked, and `search` was not: it read the
+    full-text index directly and then fetched each task by id. An agent of one
+    person could therefore find the titles of the other person's tasks. The
+    scope is now inside the query rather than a filter over its result, because
+    a filter over the result still reports how many rows it threw away. Found
+    by reading every store call in the diff, not by a test, and it has one now.
+
+14. **Taking an assignee away was refused.** The browser cleared the field with
+    `clear: ["assignee_id"]`, and the list of fields a command may clear did
+    not hold that name, so the server answered "field cannot be cleared" and
+    the row kept the person on it. The phone sends an empty string for the same
+    intent, which would have written a second way of saying nobody into the
+    column. The list now holds the name, an empty value writes NULL, and one
+    test drives both clients' shapes. Found by comparing the phone's write
+    path with the server's, while bringing the phone into the household.
+
+15. **A task could be given to somebody who cannot see the list.** The gate
+    asked which projects a command touches and whether the writer may touch
+    them. It never asked whether the person named as the assignee may see them.
+    So the owner of a private list could put the other account's id on a task
+    in it, and that person then received a notification carrying the title of a
+    task they could not open. The gate now refuses it with one sentence, and
+    the same command works as soon as the list is shared. Found by reading the
+    new notification path against the visibility rules, not by a test, and it
+    has one now.
+
 ## Next, in order
 
-*Updated 2026-08-28. The earlier list is done: the real import ran, the server
-runs at a public address with Litestream replicating, and the Android app ships
-through Obtainium with a signed release. Since then the phone gained a task
-detail screen and the views, both clients gained multi-select with five bulk
-actions, the browser gained passkeys, reminders and a board of sections, and
-macOS gained the shell (M5). The filter compiler now emits either dialect, so
-the phone runs the same grammar over its own database. Capture from the keyboard
-no longer needs a launcher script, and `contrib/macos/` still works for a
-machine with no shell installed.*
+*Updated 2026-09-02. The earlier list is done: the phone is in the household,
+a comment is a row, shopping mode runs, an assignment and a comment notify, and
+the local copy is in IndexedDB.*
 
-1. **Rehearse a restore** from the Litestream replica into an empty volume, and
-   write down the steps that worked.
-2. **The second account.** Passkeys ship: the browser signs in with a
-   fingerprint, a face or a PIN, and the device token stays for the phone, the
-   shell and MCP. The partner still cannot use the app, because one account and
-   one user handle is all the server holds. Sharing, an invite that is not the
-   owner's token, and a session row per account are the household milestone.
-3. **One filter evaluator in the browser.** The browser reads a subset of the
-   grammar in JavaScript, so an unusual term quietly shows the wrong rows. The
-   phone has no such gap, because it calls the shared compiler. WebAssembly, or
-   a `POST /v1/query`, closes it.
-4. **A reminder in quick add.** `remind me at 8` parses in no client yet. The
-   reminder is set in the task detail sheet.
-5. **The calendar layout.** Sections and the board ship. A month and a week
-   view, with drag to reschedule, do not.
+1. **Use it.** Everything M2, M5 and M6 name is built, and three exit tests
+   need a person and not code: one week of the web app, one week of the macOS
+   shell, and one month of the partner's shopping. Nothing on this list matters
+   more than starting them.
+2. **The hour grid on the week calendar.** The last layout the plan names that
+   this build draws differently: a week is seven day columns, so a task with a
+   time sorts to the top of its day. Time blocking in Phase 3 needs the grid.
+3. **Comments on the phone.** A conversation that only one client can read is
+   half a conversation. It needs a Room entity, the rows in the sync mapping,
+   and a place in the detail sheet.
+4. **The activity log.** Phase 2 names one per project and per task, with
+   restore, and §6.6 asks for the same table as the audit trail of a login.
+   Nothing in this build records who did what.
+5. **The drill against the real bucket, on a schedule.** The restore is
+   rehearsed on a laptop and it passes. Nobody has restored from the bucket the
+   deployment writes to, which is the run that also proves the credentials, and
+   nothing runs it monthly.
+

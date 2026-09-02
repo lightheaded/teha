@@ -6,20 +6,56 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/lightheaded/teha/internal/store"
 )
 
-// fakePusher stands in for internal/push. The api package needs two methods,
-// so a test needs two methods.
+// fakePusher stands in for internal/push. The api package needs three methods,
+// so a test needs three methods.
 type fakePusher struct {
+	mu   sync.Mutex
 	key  string
 	sent int
+	// to records the account of the last test push, so a test can prove that
+	// a notification goes to the person who asked for it.
+	to string
+	// events records what Deliver handed over. It is read from another
+	// goroutine, so the mutex above guards it.
+	events []store.Event
 }
 
 func (f *fakePusher) PublicKey() string { return f.key }
-func (f *fakePusher) SendTest(context.Context) (int, error) {
+func (f *fakePusher) SendTestTo(_ context.Context, accountID string) (int, error) {
 	f.sent++
+	f.to = accountID
 	return 1, nil
+}
+
+func (f *fakePusher) SendEvents(_ context.Context, events []store.Event) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, events...)
+	return len(events), nil
+}
+
+// took waits for Deliver to hand the events over. Deliver runs in its own
+// goroutine, so a test that read the field at once would race with it.
+func (f *fakePusher) took(t *testing.T, want int) []store.Event {
+	t.Helper()
+	for i := 0; i < 200; i++ {
+		f.mu.Lock()
+		got := append([]store.Event{}, f.events...)
+		f.mu.Unlock()
+		if len(got) >= want {
+			return got
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("the sender was handed %d events, want %d", len(f.events), want)
+	return nil
 }
 
 func TestPushKeySaysWhetherPushIsOn(t *testing.T) {

@@ -9,6 +9,11 @@ only: WebAuthn needs a browser and a person's gesture, so a shell and an agent
 cannot use one. The token is therefore not going away. Read
 [USAGE.md](USAGE.md#passkeys) for the browser side.
 
+**A token names one account.** `TEHA_TOKEN` on the server is the owner's.
+Somebody who joins the household with an invitation gets a token of their own,
+shown once in the answer, and every client on this page works the same way with
+it: what they see is what that account owns and what somebody shared with it.
+
 
 Every example uses the default address `http://127.0.0.1:8637`.
 
@@ -245,6 +250,7 @@ server address and the device token, then opens the app.
 | `Enter` in the panel | Adds the task and closes the panel |
 | `Escape` in the panel | Closes the panel and adds nothing |
 | The menu bar icon | Quick add, open the app, settings, quit |
+| The Dock icon | Opens the app. The close button hides the window and keeps the icon |
 | **Settings** | Changes the address, the token and the shortcut |
 
 The panel takes the same line as `teha add`. It gives the keyboard back to the
@@ -295,9 +301,14 @@ the same server. Keep the real token out of the file:
 ```
 
 The tools are `list_tasks`, `add_tasks`, `update_tasks`, `complete_tasks`,
-`list_projects`, `add_project`, `search` and `plan_day`. `list_projects` also
-reports the sections of each project, and `/Name` filters by one. They take the same
-filter language as `teha ls`.
+`list_projects`, `add_project`, `comments`, `add_comment`, `search` and
+`plan_day`. `list_projects` also reports the sections of each project, and
+`/Name` filters by one. They take the same filter language as `teha ls`.
+
+`comments` reads the talk on one task and `add_comment` leaves a line on it, so
+an agent can record what it found for the next reader. A comment names its
+author, and the filter term `comment: words` finds a task by what was said on
+it.
 
 No tool sets a reminder. An agent can give a task a due date and a due time,
 and a person then arms the notification in the web app. The commands exist on

@@ -61,7 +61,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import io.github.lightheaded.teha.data.Edit
+import io.github.lightheaded.teha.data.db.AccountEntity
 import io.github.lightheaded.teha.data.db.ProjectEntity
+import io.github.lightheaded.teha.data.db.SectionEntity
 import io.github.lightheaded.teha.data.db.TaskEntity
 import io.github.lightheaded.teha.parser.Binding
 import io.github.lightheaded.teha.ui.theme.priorityColor
@@ -87,6 +89,13 @@ fun TaskDetailSheet(
     task: TaskEntity,
     subtasks: List<TaskEntity>,
     projects: List<ProjectEntity>,
+    // The sections of every project. The chip shows the ones of this task's
+    // project, and it shows nothing at all when that project has none.
+    sections: List<SectionEntity>,
+    // The people of the household, and who this phone is. A list of one person
+    // draws no assignee chip: a field that always says "me" is in the way.
+    people: List<AccountEntity>,
+    me: String,
     knownLabels: List<String>,
     today: String,
     onEdit: (Edit) -> Unit,
@@ -131,6 +140,8 @@ fun TaskDetailSheet(
                 }
                 PriorityChip(task.priority, onEdit)
                 ProjectChip(project, projects, onEdit)
+                SectionChip(task, sections, onEdit)
+                AssigneeChip(task, people, me, onEdit)
                 LabelsChip(task.labels, knownLabels, onEdit)
                 RepeatChip(task.rrule, onEdit)
                 DayChip(
@@ -380,6 +391,81 @@ private fun ProjectChip(
                 DropdownMenuItem(
                     text = { Text(if (p.isInbox) "Inbox" else p.name) },
                     onClick = { open = false; onEdit(Edit.Project(p.id)) },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * SectionChip files the task under a heading of its project.
+ *
+ * A project with no section draws no chip. The board in the browser files a
+ * task by dragging it, and this is the way that works with one hand.
+ */
+@Composable
+private fun SectionChip(
+    task: TaskEntity,
+    sections: List<SectionEntity>,
+    onEdit: (Edit) -> Unit,
+) {
+    val mine = sections.filter { it.projectId == task.projectId }
+    if (mine.isEmpty()) return
+    val current = mine.firstOrNull { it.id == task.sectionId }
+    var open by remember { mutableStateOf(false) }
+    Box {
+        AssistChip(
+            onClick = { open = true },
+            label = { Text(current?.name ?: "No section") },
+        )
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text("No section") },
+                onClick = { open = false; onEdit(Edit.Section(null)) },
+            )
+            mine.forEach { section ->
+                DropdownMenuItem(
+                    text = { Text(section.name) },
+                    onClick = { open = false; onEdit(Edit.Section(section.id)) },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * AssigneeChip says who does the task.
+ *
+ * It draws nothing while the household holds one person. An assignee only
+ * means something in a list two people share, and a chip that always says
+ * "me" is a chip in the way.
+ */
+@Composable
+private fun AssigneeChip(
+    task: TaskEntity,
+    people: List<AccountEntity>,
+    me: String,
+    onEdit: (Edit) -> Unit,
+) {
+    if (people.size < 2) return
+    val current = people.firstOrNull { it.id == task.assigneeId }
+    val label = when {
+        current == null -> "Nobody"
+        current.id == me -> "Me"
+        else -> current.name
+    }
+    var open by remember { mutableStateOf(false) }
+    Box {
+        AssistChip(onClick = { open = true }, label = { Text(label) })
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text("Nobody") },
+                onClick = { open = false; onEdit(Edit.Assignee(null)) },
+            )
+            people.forEach { person ->
+                DropdownMenuItem(
+                    text = { Text(if (person.id == me) "Me" else person.name) },
+                    onClick = { open = false; onEdit(Edit.Assignee(person.id)) },
                 )
             }
         }

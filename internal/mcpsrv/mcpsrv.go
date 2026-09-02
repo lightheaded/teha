@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -46,11 +47,22 @@ type Handler struct {
 	Store *store.Store
 	API   *api.Server
 	Now   func() time.Time
+
+	mu      sync.Mutex
+	servers map[string]*mcp.Server
+}
+
+// view is the handler bound to one account. Every tool answers for the person
+// whose token drove the call, so an agent of one person never reads or writes
+// the other person's lists.
+type view struct {
+	*Handler
+	me store.Account
 }
 
 // New builds the handler.
 func New(s *store.Store, a *api.Server) *Handler {
-	return &Handler{Store: s, API: a, Now: time.Now}
+	return &Handler{Store: s, API: a, Now: time.Now, servers: map[string]*mcp.Server{}}
 }
 
 // HTTP returns the handler to mount at /mcp.
@@ -60,58 +72,93 @@ func New(s *store.Store, a *api.Server) *Handler {
 // on because a tool result is one small object, so a stream frame adds cost
 // without adding value.
 func (h *Handler) HTTP() http.Handler {
-	srv := h.Server() // one server, built once: tools do not change at runtime
+	// One server per account, built once and kept. The tools of an account do
+	// not change at runtime, and a household holds two or three people, so the
+	// map stays tiny.
 	return mcp.NewStreamableHTTPHandler(
-		func(*http.Request) *mcp.Server { return srv },
+		func(r *http.Request) *mcp.Server {
+			me := store.Account{ID: store.OwnerID, InboxID: store.InboxID}
+			if h.API != nil {
+				if a, ok := h.API.Caller(r); ok {
+					me = a
+				}
+			}
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			if srv, ok := h.servers[me.ID]; ok {
+				return srv
+			}
+			srv := h.Server(me)
+			h.servers[me.ID] = srv
+			return srv
+		},
 		&mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true},
 	)
 }
 
 // Server builds the MCP server with every tool registered.
-func (h *Handler) Server() *mcp.Server {
+func (h *Handler) Server(me store.Account) *mcp.Server {
+	if me.ID == "" {
+		me = store.Account{ID: store.OwnerID, InboxID: store.InboxID}
+	}
+	if me.InboxID == "" {
+		me.InboxID = store.InboxID
+	}
+	h2 := &view{Handler: h, me: me}
 	s := mcp.NewServer(&mcp.Implementation{Name: "teha", Version: "0.1.0"}, nil)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "list_tasks",
 		Description: "List tasks that match a filter. This is the main read tool: " +
 			"push the work into the filter instead of listing a project and looping. " + filterHelp,
-	}, h.listTasks)
+	}, h2.listTasks)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "add_tasks",
 		Description: "Add one or many tasks in one call. Dates are YYYY-MM-DD. Repeat rules are RRULE strings, for example FREQ=WEEKLY;BYDAY=MO.",
-	}, h.addTasks)
+	}, h2.addTasks)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "update_tasks",
 		Description: "Change one or many tasks in one call. Send only the fields that change. Use clear to empty a field.",
-	}, h.updateTasks)
+	}, h2.updateTasks)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "complete_tasks",
 		Description: "Complete one or many tasks by id. A repeating task moves to its next date instead of closing.",
-	}, h.completeTasks)
+	}, h2.completeTasks)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "list_projects",
 		Description: "List every project with its id, name, open task count and sections. A section is a heading inside a project, and the filter term for one is /Name.",
-	}, h.listProjects)
+	}, h2.listProjects)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "add_project",
 		Description: "Create a project.",
-	}, h.addProject)
+	}, h2.addProject)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "comments",
+		Description: "Read the comments on one task, oldest first. A comment is the talk about " +
+			"a task, and the filter term for the text of one is comment: words.",
+	}, h2.comments)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "add_comment",
+		Description: "Leave a comment on a task. Use it to record what you found, so the next reader has it.",
+	}, h2.addComment)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "search",
 		Description: "Full-text search over task titles and descriptions.",
-	}, h.search)
+	}, h2.search)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "plan_day",
 		Description: "One call for the daily ritual: overdue tasks, tasks due today, and the " +
 			"undated pile grouped by project. Use this instead of three list calls.",
-	}, h.planDay)
+	}, h2.planDay)
 
 	return s
 }
@@ -133,7 +180,7 @@ type taskOut struct {
 	State string   `json:"st,omitempty"` // only when not open
 }
 
-func (h *Handler) toOut(t store.Task, names map[string]string, fields map[string]bool) taskOut {
+func (h *view) toOut(t store.Task, names map[string]string, fields map[string]bool) taskOut {
 	o := taskOut{ID: t.ID, Ti: t.Title}
 	if t.DueDate != nil {
 		o.Due = *t.DueDate
@@ -161,8 +208,8 @@ func (h *Handler) toOut(t store.Task, names map[string]string, fields map[string
 	return o
 }
 
-func (h *Handler) projectNames() (map[string]string, error) {
-	ps, err := h.Store.Projects()
+func (h *view) projectNames() (map[string]string, error) {
+	ps, err := h.Store.ProjectsFor(h.me.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -196,8 +243,8 @@ type listTasksOut struct {
 	Next int       `json:"next,omitempty"`
 }
 
-func (h *Handler) listTasks(ctx context.Context, req *mcp.CallToolRequest, a listTasksArgs) (*mcp.CallToolResult, any, error) {
-	where, args, err := filter.Compile(a.Filter, h.Now())
+func (h *view) listTasks(ctx context.Context, req *mcp.CallToolRequest, a listTasksArgs) (*mcp.CallToolResult, any, error) {
+	where, args, err := filter.CompileFor(a.Filter, h.Now(), h.schema())
 	if err != nil {
 		return toolError("the filter did not parse: " + err.Error() + " " + filterHelp)
 	}
@@ -208,7 +255,7 @@ func (h *Handler) listTasks(ctx context.Context, req *mcp.CallToolRequest, a lis
 	if limit > 200 {
 		limit = 200
 	}
-	tasks, err := h.Store.Query(where, args, limit+1, a.Cursor)
+	tasks, err := h.Store.QueryFor(where, args, limit+1, a.Cursor, h.me.ID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -254,7 +301,7 @@ type writeOut struct {
 	V      int64    `json:"v"`
 }
 
-func (h *Handler) addTasks(ctx context.Context, req *mcp.CallToolRequest, a addTasksArgs) (*mcp.CallToolResult, any, error) {
+func (h *view) addTasks(ctx context.Context, req *mcp.CallToolRequest, a addTasksArgs) (*mcp.CallToolResult, any, error) {
 	if len(a.Tasks) == 0 {
 		return toolError("add_tasks needs at least one task")
 	}
@@ -321,7 +368,7 @@ type updateTasksArgs struct {
 	Tasks []updateTaskArg `json:"tasks"`
 }
 
-func (h *Handler) updateTasks(ctx context.Context, req *mcp.CallToolRequest, a updateTasksArgs) (*mcp.CallToolResult, any, error) {
+func (h *view) updateTasks(ctx context.Context, req *mcp.CallToolRequest, a updateTasksArgs) (*mcp.CallToolResult, any, error) {
 	if len(a.Tasks) == 0 {
 		return toolError("update_tasks needs at least one task")
 	}
@@ -374,7 +421,7 @@ type completeArgs struct {
 	WontDo bool     `json:"wont_do,omitempty" jsonschema:"close the task as will not do instead of done"`
 }
 
-func (h *Handler) completeTasks(ctx context.Context, req *mcp.CallToolRequest, a completeArgs) (*mcp.CallToolResult, any, error) {
+func (h *view) completeTasks(ctx context.Context, req *mcp.CallToolRequest, a completeArgs) (*mcp.CallToolResult, any, error) {
 	if len(a.IDs) == 0 {
 		return toolError("complete_tasks needs at least one id")
 	}
@@ -404,12 +451,12 @@ type sectionOut struct {
 	Name string `json:"n"`
 }
 
-func (h *Handler) listProjects(ctx context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
-	ps, err := h.Store.Projects()
+func (h *view) listProjects(ctx context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
+	ps, err := h.Store.ProjectsFor(h.me.ID)
 	if err != nil {
 		return nil, nil, err
 	}
-	secs, err := h.Store.Sections()
+	secs, err := h.Store.SectionsFor(h.me.ID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -419,7 +466,7 @@ func (h *Handler) listProjects(ctx context.Context, req *mcp.CallToolRequest, _ 
 	}
 	out := make([]projectOut, 0, len(ps))
 	for _, p := range ps {
-		tasks, err := h.Store.Query("project_id = ?", []any{p.ID}, 500, 0)
+		tasks, err := h.Store.QueryFor("project_id = ?", []any{p.ID}, 500, 0, h.me.ID)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -439,7 +486,7 @@ type addProjectArgs struct {
 	Color string `json:"color,omitempty"`
 }
 
-func (h *Handler) addProject(ctx context.Context, req *mcp.CallToolRequest, a addProjectArgs) (*mcp.CallToolResult, any, error) {
+func (h *view) addProject(ctx context.Context, req *mcp.CallToolRequest, a addProjectArgs) (*mcp.CallToolResult, any, error) {
 	if strings.TrimSpace(a.Name) == "" {
 		return toolError("a project needs a name")
 	}
@@ -450,16 +497,90 @@ func (h *Handler) addProject(ctx context.Context, req *mcp.CallToolRequest, a ad
 	return h.run([]store.Command{command("project_add", args)})
 }
 
+type commentsArgs struct {
+	TaskID string `json:"task_id"`
+}
+
+// commentOut uses short keys, like taskOut. Wh is who wrote the line, as a
+// name, because an account id means nothing to a reader.
+type commentOut struct {
+	ID   string `json:"id"`
+	Wh   string `json:"wh"`
+	At   string `json:"at"`
+	Body string `json:"body"`
+}
+
+type commentsOut struct {
+	Task string       `json:"task"`
+	C    []commentOut `json:"c"`
+	N    int          `json:"n"`
+}
+
+func (h *view) comments(ctx context.Context, req *mcp.CallToolRequest, a commentsArgs) (*mcp.CallToolResult, any, error) {
+	if strings.TrimSpace(a.TaskID) == "" {
+		return toolError("comments needs a task_id")
+	}
+	rows, err := h.Store.CommentsFor(a.TaskID, h.me.ID)
+	if err != nil {
+		return toolError("no task with id " + a.TaskID)
+	}
+	who, err := h.peopleNames()
+	if err != nil {
+		return nil, nil, err
+	}
+	out := commentsOut{Task: a.TaskID, C: []commentOut{}}
+	for _, c := range rows {
+		name := who[c.AccountID]
+		if name == "" {
+			name = c.AccountID
+		}
+		out.C = append(out.C, commentOut{ID: c.ID, Wh: name, At: c.CreatedAt, Body: c.Body})
+	}
+	out.N = len(out.C)
+	return structured(out)
+}
+
+type addCommentArgs struct {
+	TaskID string `json:"task_id"`
+	Body   string `json:"body"`
+}
+
+func (h *view) addComment(ctx context.Context, req *mcp.CallToolRequest, a addCommentArgs) (*mcp.CallToolResult, any, error) {
+	if strings.TrimSpace(a.TaskID) == "" || strings.TrimSpace(a.Body) == "" {
+		return toolError("a comment needs a task_id and a body")
+	}
+	return h.run([]store.Command{command("comment_add", store.CommentArgs{
+		ID: id.New("cm"), TaskID: ptr(a.TaskID), Body: ptr(a.Body),
+	})})
+}
+
+// peopleNames maps an account id to the name a person reads.
+func (h *view) peopleNames() (map[string]string, error) {
+	people, err := h.Store.Accounts()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(people))
+	for _, p := range people {
+		name := p.DisplayName
+		if name == "" {
+			name = p.Name
+		}
+		out[p.ID] = name
+	}
+	return out, nil
+}
+
 type searchArgs struct {
 	Text  string `json:"text"`
 	Limit int    `json:"limit,omitempty"`
 }
 
-func (h *Handler) search(ctx context.Context, req *mcp.CallToolRequest, a searchArgs) (*mcp.CallToolResult, any, error) {
+func (h *view) search(ctx context.Context, req *mcp.CallToolRequest, a searchArgs) (*mcp.CallToolResult, any, error) {
 	if strings.TrimSpace(a.Text) == "" {
 		return toolError("search needs text")
 	}
-	ids, err := h.Store.Search(a.Text, a.Limit)
+	ids, err := h.Store.SearchFor(a.Text, a.Limit, h.me.ID)
 	if err != nil {
 		return toolError("the search index rejected that text: " + err.Error())
 	}
@@ -469,7 +590,7 @@ func (h *Handler) search(ctx context.Context, req *mcp.CallToolRequest, a search
 	}
 	out := listTasksOut{T: []taskOut{}}
 	for _, id := range ids {
-		t, err := h.Store.Task(id)
+		t, err := h.Store.TaskFor(id, h.me.ID)
 		if err != nil {
 			continue
 		}
@@ -490,18 +611,18 @@ type planDayOut struct {
 	Counts  map[string]int      `json:"n"`
 }
 
-func (h *Handler) planDay(ctx context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
+func (h *view) planDay(ctx context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
 	now := h.Now()
 	names, err := h.projectNames()
 	if err != nil {
 		return nil, nil, err
 	}
 	get := func(q string, limit int) ([]store.Task, error) {
-		where, args, err := filter.Compile(q, now)
+		where, args, err := filter.CompileFor(q, now, h.schema())
 		if err != nil {
 			return nil, err
 		}
-		return h.Store.Query(where, args, limit, 0)
+		return h.Store.QueryFor(where, args, limit, 0, h.me.ID)
 	}
 	overdue, err := get("overdue", 100)
 	if err != nil {
@@ -539,8 +660,17 @@ func (h *Handler) planDay(ctx context.Context, req *mcp.CallToolRequest, _ struc
 
 // --- plumbing ---------------------------------------------------------------
 
-func (h *Handler) run(cmds []store.Command) (*mcp.CallToolResult, any, error) {
-	v, results, err := h.Store.Apply(cmds)
+// schema names the account that is asking, so `#inbox` reaches that person's
+// inbox and `assigned to: me` reaches that person.
+func (h *view) schema() filter.Schema {
+	sc := filter.ServerSchema
+	sc.Me = h.me.ID
+	sc.InboxID = h.me.InboxID
+	return sc
+}
+
+func (h *view) run(cmds []store.Command) (*mcp.CallToolResult, any, error) {
+	v, results, events, err := h.Store.ApplyWithEvents(cmds, h.me.ID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -557,6 +687,9 @@ func (h *Handler) run(cmds []store.Command) (*mcp.CallToolResult, any, error) {
 	}
 	if h.API != nil {
 		h.API.Notify(v)
+		// An agent that gives somebody a task, or leaves a comment, tells them
+		// the same way a person does.
+		h.API.Deliver(events)
 	}
 	return structured(out)
 }

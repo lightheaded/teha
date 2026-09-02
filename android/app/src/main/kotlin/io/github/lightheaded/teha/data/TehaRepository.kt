@@ -4,10 +4,12 @@ package io.github.lightheaded.teha.data
 
 import android.content.Context
 import androidx.sqlite.db.SimpleSQLiteQuery
+import io.github.lightheaded.teha.data.db.AccountEntity
 import io.github.lightheaded.teha.data.db.LabelEntity
 import io.github.lightheaded.teha.data.db.MetaEntity
 import io.github.lightheaded.teha.data.db.OutboxEntity
 import io.github.lightheaded.teha.data.db.ProjectEntity
+import io.github.lightheaded.teha.data.db.SectionEntity
 import io.github.lightheaded.teha.data.db.TaskEntity
 import io.github.lightheaded.teha.data.db.TehaDatabase
 import io.github.lightheaded.teha.data.net.ApiClient
@@ -15,6 +17,7 @@ import io.github.lightheaded.teha.data.net.ApiError
 import io.github.lightheaded.teha.data.net.CommandDto
 import io.github.lightheaded.teha.data.net.LabelDto
 import io.github.lightheaded.teha.data.net.ProjectDto
+import io.github.lightheaded.teha.data.net.SectionDto
 import io.github.lightheaded.teha.data.net.SyncRequest
 import io.github.lightheaded.teha.data.net.TaskDto
 import io.github.lightheaded.teha.parser.Binding
@@ -70,6 +73,10 @@ sealed interface Edit {
     data class Due(val date: String?, val time: String?) : Edit
     data class Starts(val date: String?) : Edit
     data class Deadline(val date: String?) : Edit
+    /** Assignee names who does the task. A null takes the name away. */
+    data class Assignee(val accountId: String?) : Edit
+    /** Section files the task under a heading. A null takes it out of one. */
+    data class Section(val sectionId: String?) : Edit
 }
 
 /** The result of one sync. */
@@ -97,6 +104,8 @@ class TehaRepository(context: Context) {
     private val syncLock = Mutex()
 
     val projects: Flow<List<ProjectEntity>> = db.projects().all()
+    val sections: Flow<List<SectionEntity>> = db.sections().all()
+    val people: Flow<List<AccountEntity>> = db.accounts().all()
     val labels: Flow<List<LabelEntity>> = db.labels().all()
     val outboxCount: Flow<Int> = db.outbox().countFlow()
 
@@ -129,9 +138,22 @@ class TehaRepository(context: Context) {
 
     suspend fun projectsNow(): List<ProjectEntity> = db.projects().allNow()
 
-    /** inboxId reads the project the server marks as the inbox. */
-    suspend fun inboxId(): String =
-        db.projects().allNow().firstOrNull { it.isInbox }?.id ?: FALLBACK_INBOX
+    /**
+     * inboxId reads the project a capture with no project belongs in.
+     *
+     * Each account has its own inbox, so the fixed id is only right for the
+     * owner. The sync answer names the right one and Settings keeps it. The
+     * is_inbox flag on a pulled project is the second source, and the fixed id
+     * is the last one, for a phone that has never synced.
+     */
+    suspend fun inboxId(): String {
+        val known = settings.inboxId
+        if (known.isNotEmpty()) return known
+        return db.projects().allNow().firstOrNull { it.isInbox }?.id ?: FALLBACK_INBOX
+    }
+
+    /** me is the account this phone is, or an empty string before the first sync. */
+    fun me(): String = settings.accountId
 
     suspend fun version(): Long = db.meta().get(KEY_VERSION)?.toLongOrNull() ?: 0L
 
@@ -198,6 +220,8 @@ class TehaRepository(context: Context) {
             TaskEntity(
                 id = taskId,
                 projectId = projectId,
+                sectionId = null,
+                assigneeId = null,
                 parentId = null,
                 orderKey = "m",
                 title = title,
@@ -277,6 +301,10 @@ class TehaRepository(context: Context) {
         val task = db.tasks().byId(taskId) ?: return
         val row: TaskEntity
         val args: JsonObject
+        // One command per field, and one field per command. Filing a task is
+        // the exception: it moves the project and the section together, so it
+        // is a task_move.
+        var kind = "task_update"
         when (change) {
             is Edit.Title -> {
                 val title = change.value.trim()
@@ -333,9 +361,31 @@ class TehaRepository(context: Context) {
                 row = task.copy(deadline = change.date)
                 args = field(taskId, "deadline", change.date)
             }
+            is Edit.Assignee -> {
+                row = task.copy(assigneeId = change.accountId)
+                // An empty string, not a clear: the server reads
+                // assignee_id = "" as nobody, and a clear list is for the
+                // fields that are dates.
+                args = buildJsonObject {
+                    put("id", taskId)
+                    put("assignee_id", change.accountId ?: "")
+                }
+            }
+            is Edit.Section -> {
+                row = task.copy(sectionId = change.sectionId)
+                // task_move carries the project and the section together,
+                // because a section belongs to one project and the pair has to
+                // agree after the move.
+                kind = "task_move"
+                args = buildJsonObject {
+                    put("id", taskId)
+                    put("project_id", task.projectId)
+                    put("section_id", change.sectionId ?: "")
+                }
+            }
         }
         db.tasks().upsertOne(row)
-        queue("task_update", args)
+        queue(kind, args)
     }
 
     /**
@@ -390,6 +440,8 @@ class TehaRepository(context: Context) {
             TaskEntity(
                 id = id,
                 projectId = parent.projectId,
+                sectionId = null,
+                assigneeId = null,
                 parentId = parent.id,
                 orderKey = "m",
                 title = clean,
@@ -526,9 +578,31 @@ class TehaRepository(context: Context) {
                     )
                 }
 
+                // A fresh start, asked for by the server. A shared list
+                // stopped being shared, and a delta cannot describe a row that
+                // went away, so the cache goes and the pull below is from
+                // zero. The outbox stays: what this phone wrote is still owed.
+                if (response.reset) {
+                    db.tasks().clear()
+                    db.projects().clear()
+                    db.sections().clear()
+                    db.labels().clear()
+                }
+
                 db.projects().upsert(response.projects.map { it.toEntity() })
+                db.sections().upsert(response.sections.map { it.toEntity() })
                 db.labels().upsert(response.labels.map { it.toEntity() })
                 db.tasks().upsert(response.tasks.map { it.toEntity() })
+
+                // Who is asking, and where their inbox is. The server answers
+                // both on every sync, so a phone learns them without a second
+                // call and a capture with no project lands in the right place.
+                if (response.me.isNotEmpty()) settings.accountId = response.me
+                if (response.inbox.isNotEmpty()) settings.inboxId = response.inbox
+
+                // A reset means somebody shared a list or took one back, so
+                // the list of people and of shares is out of date as well.
+                if (response.reset) readHousehold()
 
                 val answer = response.applied.associateBy { it.uuid }
 
@@ -568,6 +642,62 @@ class TehaRepository(context: Context) {
     }
 
     /**
+     * join redeems an invitation code and makes this phone a second account.
+     *
+     * The code is the credential: this is the one call that carries no device
+     * token, and the answer carries the token that every later call does. The
+     * cache is dropped before the token changes, because what it holds belongs
+     * to whoever the phone was before.
+     */
+    suspend fun join(code: String, name: String): SyncResult {
+        if (!settings.isConfigured) {
+            return SyncResult.Failed("Set the server address first.", false)
+        }
+        return try {
+            val answer = api.join(code, name)
+            if (answer.token.isEmpty()) {
+                return SyncResult.Failed("The server did not answer with a token.", false)
+            }
+            reset()
+            db.outbox().clear()
+            settings.token = answer.token
+            settings.accountId = answer.account
+            settings.accountName = answer.name
+            sync()
+        } catch (e: ApiError) {
+            SyncResult.Failed(e.message ?: "The invitation was refused.", false)
+        } catch (e: IOException) {
+            SyncResult.Failed("Cannot reach the server. ${e.message ?: "No answer."}", false)
+        } catch (e: Exception) {
+            SyncResult.Failed("Joining failed. ${e.message}", false)
+        }
+    }
+
+    /**
+     * readHousehold reads who is in the house and keeps the list.
+     *
+     * It fails quietly. A household of one needs none of it, and a phone with
+     * no network keeps the list it had.
+     */
+    suspend fun readHousehold() {
+        try {
+            val answer = api.household()
+            if (answer.me.isNotEmpty()) settings.accountId = answer.me
+            if (answer.inbox.isNotEmpty()) settings.inboxId = answer.inbox
+            db.accounts().clear()
+            db.accounts().upsert(
+                answer.people.map {
+                    AccountEntity(id = it.id, name = it.name, isMe = it.isMe, isOwner = it.isOwner)
+                }
+            )
+            answer.people.firstOrNull { it.isMe }?.let { settings.accountName = it.name }
+        } catch (e: Exception) {
+            // A server that is older than the household answers 404 here, and
+            // that is not a failure the user has to read.
+        }
+    }
+
+    /**
      * reset drops the cache and the high water mark, so the next sync pulls
      * everything again.
      *
@@ -577,6 +707,7 @@ class TehaRepository(context: Context) {
     suspend fun reset() {
         db.tasks().clear()
         db.projects().clear()
+        db.sections().clear()
         db.labels().clear()
         db.meta().clear()
     }
@@ -595,12 +726,18 @@ private fun ProjectDto.toEntity() = ProjectEntity(
     orderKey = orderKey, isInbox = isInbox, deletedAt = deletedAt, version = version,
 )
 
+private fun SectionDto.toEntity() = SectionEntity(
+    id = id, projectId = projectId, name = name, orderKey = orderKey,
+    deletedAt = deletedAt, version = version,
+)
+
 private fun LabelDto.toEntity() = LabelEntity(
     id = id, name = name, color = color, deletedAt = deletedAt, version = version,
 )
 
 private fun TaskDto.toEntity() = TaskEntity(
-    id = id, projectId = projectId, parentId = parentId, orderKey = orderKey,
+    id = id, projectId = projectId, sectionId = sectionId, assigneeId = assigneeId,
+    parentId = parentId, orderKey = orderKey,
     title = title, description = description, priority = priority,
     dueDate = dueDate, dueTime = dueTime, dueTz = dueTz,
     rrule = rrule, rruleFromCompletion = rruleFromCompletion,

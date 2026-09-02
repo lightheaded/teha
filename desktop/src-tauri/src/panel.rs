@@ -7,14 +7,12 @@
 //! it. The page is local, so it opens with no network call and no server.
 //!
 //! The panel must not take the place of the application the person works in.
-//! On macOS this application is an accessory while the panel is the only window
-//! on the screen, so the keyboard goes back to that application when the panel
-//! hides. See `policy.rs`.
+//! On macOS the shell hides itself when the panel was its only window on the
+//! screen, so the keyboard goes back to that application. See `policy.rs`.
 
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
 use crate::policy;
-use crate::web;
 
 /// The label of the panel window. The capability file names it.
 pub const PANEL: &str = "quickadd";
@@ -47,26 +45,12 @@ fn create(app: &AppHandle) -> Result<WebviewWindow, String> {
     Ok(window)
 }
 
-/// Match the Dock icon to the window that is on the screen. The panel alone
-/// keeps the application out of the Dock, and the web app puts it back.
-fn restore_policy(app: &AppHandle) {
-    let main_is_up = app
-        .get_webview_window(web::MAIN)
-        .and_then(|window| window.is_visible().ok())
-        .unwrap_or(false);
-    if main_is_up {
-        policy::regular(app);
-    } else {
-        policy::accessory(app);
-    }
-}
-
 /// Hide the panel and give the keyboard back.
 pub fn hide(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(PANEL) {
         let _ = window.hide();
     }
-    restore_policy(app);
+    policy::release_keyboard(app);
 }
 
 /// Open the panel in the middle of the screen, with the field ready.
@@ -81,7 +65,7 @@ pub fn show(app: &AppHandle) {
             }
         },
     };
-    restore_policy(app);
+    policy::unhide(app);
     let _ = window.center();
     let _ = window.show();
     let _ = window.set_focus();

@@ -383,7 +383,17 @@ func (c *client) add(line string, out io.Writer) error {
 		args.RRule = &p.RRule
 	}
 	args.Labels = p.Labels
+
+	// "remind me at 8" with no day means the next 8 o'clock that has not
+	// passed. A reminder needs a due moment to count from.
+	if p.RemindAt != "" && p.Due == "" {
+		p.Due = nextClockDay(p.RemindAt, time.Now())
+		args.DueDate = &p.Due
+	}
 	cmds = append(cmds, newCommand("task_add", args))
+	if rem, ok := reminderCommand(args.ID, p); ok {
+		cmds = append(cmds, rem)
+	}
 
 	if err := c.apply(cmds); err != nil {
 		return err
@@ -414,6 +424,12 @@ func summary(p quickadd.Result, projectName string) string {
 	}
 	for _, l := range p.Labels {
 		parts = append(parts, "@"+l)
+	}
+	switch {
+	case p.RemindAt != "":
+		parts = append(parts, "reminder "+p.RemindAt)
+	case p.RemindBefore != 0:
+		parts = append(parts, "reminder "+remindWord(p.RemindBefore)+" before")
 	}
 	if len(parts) == 0 {
 		return p.Title
@@ -543,6 +559,79 @@ func (c *client) dueCell(t store.Task, today string) string {
 		return c.paint(text, "31")
 	}
 	return text
+}
+
+// nextClockDay returns the day that a clock time with no date belongs to: today
+// while that time is still ahead, and tomorrow once it has passed.
+func nextClockDay(clock string, now time.Time) string {
+	at, err := time.ParseInLocation("2006-01-02 15:04", now.Format("2006-01-02")+" "+clock, now.Location())
+	if err != nil || at.After(now) {
+		return now.Format("2006-01-02")
+	}
+	return now.AddDate(0, 0, 1).Format("2006-01-02")
+}
+
+// reminderCommand builds the reminder that one quick add line asked for. The
+// command line client owns the time zone of the person typing, so it computes
+// the moment and sends the server UTC, exactly as the browser does.
+//
+// A clock time becomes an offset from the due moment, because that is the one
+// shape a reminder on a task holds. A task with a day and no time counts as
+// 09:00, the same rule the web app follows.
+func reminderCommand(taskID string, p quickadd.Result) (store.Command, bool) {
+	if p.Due == "" || (p.RemindAt == "" && p.RemindBefore == 0) {
+		return store.Command{}, false
+	}
+	clock := p.Time
+	if clock == "" {
+		clock = "09:00"
+	}
+	due, err := time.ParseInLocation("2006-01-02 15:04", p.Due+" "+clock, time.Local)
+	if err != nil {
+		return store.Command{}, false
+	}
+	offset := p.RemindBefore
+	if p.RemindAt != "" {
+		fire, err := time.ParseInLocation("2006-01-02 15:04", p.Due+" "+p.RemindAt, time.Local)
+		if err != nil {
+			return store.Command{}, false
+		}
+		offset = int(due.Sub(fire).Minutes())
+	}
+	kind := store.KindBeforeDue
+	if offset == 0 {
+		kind = store.KindAtDue
+	}
+	fireAt := due.Add(-time.Duration(offset) * time.Minute).UTC().Format(time.RFC3339)
+	rid := id.New("r")
+	rem := store.ReminderArgs{ID: rid, TaskID: &taskID, Kind: &kind, FireAt: &fireAt}
+	if offset != 0 {
+		rem.OffsetMin = &offset
+	}
+	return newCommand("reminder_add", rem), true
+}
+
+// remindWord says an offset in minutes the way a person says it.
+func remindWord(min int) string {
+	n := min
+	if n < 0 {
+		n = -n
+	}
+	switch {
+	case n%1440 == 0 && n != 0:
+		return plural(n/1440, "day")
+	case n%60 == 0 && n != 0:
+		return plural(n/60, "hour")
+	default:
+		return plural(n, "minute")
+	}
+}
+
+func plural(n int, word string) string {
+	if n == 1 {
+		return "1 " + word
+	}
+	return strconv.Itoa(n) + " " + word + "s"
 }
 
 // humanDate writes a date the way a person reads it in a list.

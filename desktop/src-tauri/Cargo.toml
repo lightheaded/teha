@@ -13,7 +13,7 @@ license = "Apache-2.0"
 publish = false
 
 [build-dependencies]
-tauri-build = "=2.6.3"
+tauri-build = { version = "=2.6.3", features = [] }
 
 [dependencies]
 # tray-icon builds the menu bar item. image-png reads the menu bar mask that

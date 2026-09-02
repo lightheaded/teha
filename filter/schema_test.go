@@ -298,11 +298,16 @@ func TestRoomSQLNamesNoServerColumn(t *testing.T) {
 
 // A term that needs a column the client does not keep must fail with a
 // sentence, and never compile to SQL that names the absent column.
-// The phone holds no section table, so a section term must fail with a sentence
-// rather than compile to SQL that names a table Room never declared.
-func TestRoomRefusesSectionTerm(t *testing.T) {
+//
+// The test takes the table away from a schema rather than naming a client. The
+// phone kept no section table until it joined the household, and the promise
+// is about the missing table.
+func TestAStoreWithNoSectionTableRefusesASectionTerm(t *testing.T) {
+	schema := ServerSchema
+	schema.Section = ""
+	schema.SectionID = ""
 	for _, q := range []string{"/Winter", "/Win*", "no section", "no sections"} {
-		sql, _, err := CompileFor(q, today, RoomSchema)
+		sql, _, err := CompileFor(q, today, schema)
 		if err == nil {
 			t.Errorf("%q compiled to %q, want a failure", q, sql)
 			continue
@@ -315,6 +320,37 @@ func TestRoomRefusesSectionTerm(t *testing.T) {
 	for _, q := range []string{"/Winter", "/Win*", "no section"} {
 		if _, _, err := Compile(q, today); err != nil {
 			t.Errorf("the server dialect refused %q with %v", q, err)
+		}
+	}
+}
+
+// The phone joined the household, so it holds the sections and the people. A
+// section term and an assignee term must answer there, in the names Room uses
+// and in no others.
+func TestRoomAnswersASectionAndAnAssigneeTerm(t *testing.T) {
+	schema := RoomSchema
+	schema.Me = "a_partner"
+	cases := []struct{ query, wants string }{
+		{"/Winter", "FROM sections"},
+		{"no section", "sectionId IS NULL"},
+		{"assigned", "assigneeId"},
+		{"unassigned", "assigneeId"},
+		{"assigned to: me", "assigneeId = ?"},
+		{"assigned to: Partner", "FROM accounts"},
+	}
+	for _, tc := range cases {
+		sql, _, err := CompileFor(tc.query, today, schema)
+		if err != nil {
+			t.Errorf("%q: %v", tc.query, err)
+			continue
+		}
+		if !strings.Contains(sql, tc.wants) {
+			t.Errorf("%q compiled to %q, which does not name %q", tc.query, sql, tc.wants)
+		}
+		// Room keeps one name per person, so the compiler must not name the
+		// column the server calls display_name.
+		if strings.Contains(sql, "display_name") {
+			t.Errorf("%q compiled to %q, and Room keeps no display_name", tc.query, sql)
 		}
 	}
 }

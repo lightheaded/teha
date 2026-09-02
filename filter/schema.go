@@ -28,6 +28,14 @@ type Schema struct {
 	// Section is empty on a store that holds no section table. A `/section`
 	// term then fails with a message that says so.
 	Section string
+	// Account is the table of the people in the household, and it is empty on
+	// a store that keeps none. `assigned to: <name>` needs it to turn a name
+	// into an id.
+	Account string
+	// Comment is the table of the lines of talk on a task, and it is empty on
+	// a store that keeps none. A `comment:` term then fails with a message
+	// that says so.
+	Comment string
 
 	// Columns that every table above spells the same way.
 	ID        string
@@ -53,6 +61,23 @@ type Schema struct {
 	// term then fails with a message that says so, rather than compiling to
 	// SQL that names a column the store does not have.
 	CreatedAt string
+	// Assignee is the task column that names who does the task. It is empty on
+	// a store that keeps no assignee, and an `assigned` term then fails.
+	Assignee string
+	// Me is the account that is asking. `assigned to: me` needs it, and
+	// nothing else does. A store with one account leaves it empty and the
+	// term then says so rather than answering for the wrong person.
+	Me string
+
+	// The columns of the comment table. They go with Comment: all three are
+	// set, or none is.
+	CommentTask string
+	CommentBody string
+
+	// AccountDisplay is the second name of a person, the one an app shows. It
+	// is empty on a store that keeps one name per person, and `assigned to: a
+	// name` then matches Name alone.
+	AccountDisplay string
 
 	// The columns of the join table.
 	TaskLabelTask  string
@@ -75,6 +100,8 @@ var ServerSchema = Schema{
 	Label:     "label",
 	TaskLabel: "task_label",
 	Section:   "section",
+	Account:   "account",
+	Comment:   "comment",
 
 	ID:        "id",
 	Name:      "name",
@@ -93,9 +120,15 @@ var ServerSchema = Schema{
 	State:       "state",
 	SectionID:   "section_id",
 	CreatedAt:   "created_at",
+	Assignee:    "assignee_id",
 
 	TaskLabelTask:  "task_id",
 	TaskLabelLabel: "label_id",
+
+	CommentTask: "task_id",
+	CommentBody: "body",
+
+	AccountDisplay: "display_name",
 
 	InboxID: "inbox",
 }
@@ -109,9 +142,13 @@ var ServerSchema = Schema{
 //
 //   - Labels is a comma-joined column, so a label term becomes a LIKE over a
 //     padded copy of that column and never a join.
-//   - CreatedAt is absent, so a `created:` term fails with a message. Section
-//     and SectionID are absent for the same reason, because the phone holds no
-//     section table yet.
+//   - CreatedAt is absent, so a `created:` term fails with a message. Comment
+//     is absent as well, so `comment:` fails on the phone rather than searching
+//     the description and answering something close but wrong.
+//   - The phone holds the sections and the people of the household since it
+//     joined it, so a section term and an assignee term both answer. A person
+//     has one name here and two on the server, so AccountDisplay is empty and
+//     `assigned to: a name` matches the one name.
 //   - The Room database holds no fts5 table, so `search:` stays a LIKE over the
 //     title and the description. The server has `task_fts`, and the filter
 //     compiler never names it, so both dialects search the same way.
@@ -119,6 +156,8 @@ var RoomSchema = Schema{
 	Task:    "tasks",
 	Project: "projects",
 	Label:   "labels",
+	Section: "sections",
+	Account: "accounts",
 
 	ID:        "id",
 	Name:      "name",
@@ -135,6 +174,8 @@ var RoomSchema = Schema{
 	StartDate:   "startDate",
 	Deadline:    "deadline",
 	State:       "state",
+	SectionID:   "sectionId",
+	Assignee:    "assigneeId",
 	CreatedAt:   "",
 
 	Labels: "labels",

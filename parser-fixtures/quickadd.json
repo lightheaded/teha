@@ -30,6 +30,24 @@
     { "in": "Water the tomatoes every 3 days", "title": "Water the tomatoes", "rrule": "FREQ=DAILY;INTERVAL=3" },
     { "in": "Call the plumber tomorrow p1 #Home @call", "title": "Call the plumber", "due": "2026-08-26", "priority": 1, "project": "Home", "labels": ["call"] },
     { "in": "Read about p2 engines", "title": "Read about engines", "priority": 2, "note": "a known limit: a priority token inside a sentence is still consumed" },
-    { "in": "   Trim   the   spaces   ", "title": "Trim the spaces" }
+    { "in": "   Trim   the   spaces   ", "title": "Trim the spaces" },
+
+    { "in": "Call the bank tomorrow remind me at 8", "title": "Call the bank", "due": "2026-08-26", "remind_at": "08:00" },
+    { "in": "Standup at 9:30 remind me at 9:15", "title": "Standup", "time": "09:30", "remind_at": "09:15" },
+    { "in": "Call mum remind me at 7pm", "title": "Call mum", "remind_at": "19:00" },
+    { "in": "Leave for the airport tomorrow remind me 30 minutes before", "title": "Leave for the airport", "due": "2026-08-26", "remind_before": 30 },
+    { "in": "Pay rent tomorrow remind me 2 hours before", "title": "Pay rent", "due": "2026-08-26", "remind_before": 120 },
+    { "in": "Renew the pass tomorrow remind me 1 day before", "title": "Renew the pass", "due": "2026-08-26", "remind_before": 1440 },
+    { "in": "Ship it tomorrow reminder 45m before", "title": "Ship it", "due": "2026-08-26", "remind_before": 45 },
+
+    { "in": "Read \"tomorrow never dies\" p1", "title": "Read \"tomorrow never dies\"", "priority": 1 },
+    { "in": "Watch \"every day is a good day\"", "title": "Watch \"every day is a good day\"" },
+    { "in": "Check https://example.org/v1.2/notes tomorrow", "title": "Check https://example.org/v1.2/notes", "due": "2026-08-26" },
+    { "in": "Read https://example.org/2026/08/24.12/x", "title": "Read https://example.org/2026/08/24.12/x" },
+    { "in": "Open https://example.org/p1#Home @call", "title": "Open https://example.org/p1#Home", "labels": ["call"] },
+    { "in": "Mail mailto:a@example.org tomorrow", "title": "Mail mailto:a@example.org", "due": "2026-08-26" },
+    { "in": "Fix `every day` in the docs", "title": "Fix `every day` in the docs" },
+    { "in": "Read [the plan for tomorrow](https://example.org/p) friday", "title": "Read [the plan for tomorrow](https://example.org/p)", "due": "2026-08-28" },
+    { "in": "Read [the plan](https://example.org/p) tomorrow p1 #Home", "title": "Read [the plan](https://example.org/p)", "due": "2026-08-26", "priority": 1, "project": "Home" }
   ]
 }

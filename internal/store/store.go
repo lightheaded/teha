@@ -77,6 +77,18 @@ func Open(path string) (*Store, error) {
 func (s *Store) migrate() error {
 	steps := []struct{ table, column, ddl string }{
 		{"task", "section_id", `ALTER TABLE task ADD COLUMN section_id TEXT REFERENCES section(id)`},
+		// The household. See internal/store/account.go.
+		{"account", "token_hash", `ALTER TABLE account ADD COLUMN token_hash TEXT NOT NULL DEFAULT ''`},
+		{"account", "inbox_id", `ALTER TABLE account ADD COLUMN inbox_id TEXT`},
+		{"account", "is_owner", `ALTER TABLE account ADD COLUMN is_owner INTEGER NOT NULL DEFAULT 0`},
+		{"project", "owner_id", `ALTER TABLE project ADD COLUMN owner_id TEXT`},
+		// A reminder is personal, even on a shared task: two people do not
+		// want one nudge between them.
+		{"reminder", "account_id", `ALTER TABLE reminder ADD COLUMN account_id TEXT`},
+		// A push subscription is one browser of one person. Without the
+		// column, a second account's browser would receive the first
+		// account's reminders.
+		{"push_subscription", "account_id", `ALTER TABLE push_subscription ADD COLUMN account_id TEXT`},
 	}
 	for _, st := range steps {
 		has, err := s.hasColumn(st.table, st.column)
@@ -92,8 +104,30 @@ func (s *Store) migrate() error {
 	}
 	// The board reads one project at a time, and Pull reads by version, so the
 	// index that matches is the pair.
-	_, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS task_by_section ON task(section_id)`)
-	return err
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS task_by_section ON task(section_id)`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS project_by_owner ON project(owner_id)`); err != nil {
+		return err
+	}
+
+	// Fill in what the new columns mean for a file that predates them. Every
+	// row of such a file belongs to the owner, because there was nobody else.
+	// Each statement names IS NULL, so it does nothing on the second run and
+	// nothing to a row that a later account wrote.
+	backfill := []string{
+		`UPDATE project SET owner_id = '` + OwnerID + `' WHERE owner_id IS NULL`,
+		`UPDATE reminder SET account_id = '` + OwnerID + `' WHERE account_id IS NULL`,
+		`UPDATE push_subscription SET account_id = '` + OwnerID + `' WHERE account_id IS NULL`,
+		`UPDATE account SET inbox_id = '` + InboxID + `', is_owner = 1 WHERE id = '` + OwnerID + `'`,
+		`UPDATE account SET inbox_id = 'inbox_' || id WHERE inbox_id IS NULL`,
+	}
+	for _, q := range backfill {
+		if _, err := s.db.Exec(q); err != nil {
+			return fmt.Errorf("backfill: %w", err)
+		}
+	}
+	return nil
 }
 
 func (s *Store) hasColumn(table, column string) (bool, error) {
@@ -117,6 +151,28 @@ func (s *Store) hasColumn(table, column string) (bool, error) {
 // Close closes the database.
 func (s *Store) Close() error { return s.db.Close() }
 
+// Checkpoint moves what the write-ahead log holds into the database file.
+//
+// This exists for the backup, and the reason is worth the paragraph. The
+// server holds one long-lived connection, so SQLite writes into the WAL and
+// checkpoints it only when it grows past its own threshold, about four
+// megabytes. Litestream replicates from the database file, so between two
+// checkpoints a replica can be minutes or days behind what the person typed,
+// and a restore then loses exactly that work.
+//
+// scripts/restore-drill.sh is the proof: with no checkpoint the drill restores
+// a file that has the seed and none of the writes after it.
+//
+// PASSIVE is the right mode. It copies what it can and gives up at once when a
+// reader is in the way, so a checkpoint never blocks the person typing. The
+// next tick tries again.
+func (s *Store) Checkpoint() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`PRAGMA wal_checkpoint(PASSIVE)`)
+	return err
+}
+
 func (s *Store) seedInbox() error {
 	var n int
 	if err := s.db.QueryRow(`SELECT count(*) FROM project WHERE id = ?`, InboxID).Scan(&n); err != nil {
@@ -136,8 +192,8 @@ func (s *Store) seedInbox() error {
 		return err
 	}
 	_, err = tx.Exec(`INSERT INTO project (id, name, color, parent_id, order_key, is_inbox,
-		created_at, updated_at, version) VALUES (?,?,?,NULL,?,1,?,?,?)`,
-		InboxID, "Inbox", "grey", "m", now, now, v)
+		owner_id, created_at, updated_at, version) VALUES (?,?,?,NULL,?,1,?,?,?,?)`,
+		InboxID, "Inbox", "grey", "m", OwnerID, now, now, v)
 	if err != nil {
 		return err
 	}
@@ -198,42 +254,68 @@ type Label struct {
 	Version   int64   `json:"v"`
 }
 
+// Comment is one line of talk on a task.
+//
+// AccountID names the author, and the author is the only person who may change
+// the line. Two people share a list, so a comment with no author reads as if
+// the household said it.
+type Comment struct {
+	ID        string  `json:"id"`
+	TaskID    string  `json:"task_id"`
+	AccountID string  `json:"account_id"`
+	Body      string  `json:"body"`
+	CreatedAt string  `json:"created_at"`
+	DeletedAt *string `json:"deleted_at,omitempty"`
+	Version   int64   `json:"v"`
+}
+
+const commentCols = `id, task_id, account_id, body, created_at, deleted_at, version`
+
+func scanComment(rows *sql.Rows) (Comment, error) {
+	var c Comment
+	err := rows.Scan(&c.ID, &c.TaskID, &c.AccountID, &c.Body, &c.CreatedAt, &c.DeletedAt, &c.Version)
+	return c, err
+}
+
 // Task is one item of work.
 type Task struct {
-	ID           string   `json:"id"`
-	ProjectID    string   `json:"project_id"`
-	SectionID    *string  `json:"section_id,omitempty"`
-	ParentID     *string  `json:"parent_id,omitempty"`
-	OrderKey     string   `json:"order_key"`
-	Title        string   `json:"title"`
-	Description  string   `json:"description,omitempty"`
-	Priority     int      `json:"priority"`
-	DueDate      *string  `json:"due_date,omitempty"`
-	DueTime      *string  `json:"due_time,omitempty"`
-	DueTz        *string  `json:"due_tz,omitempty"`
-	RRule        *string  `json:"rrule,omitempty"`
-	FromComplete bool     `json:"rrule_from_completion,omitempty"`
-	StartDate    *string  `json:"start_date,omitempty"`
-	Deadline     *string  `json:"deadline,omitempty"`
-	DurationMin  *int     `json:"duration_min,omitempty"`
-	State        string   `json:"state"`
-	CompletedAt  *string  `json:"completed_at,omitempty"`
-	DeletedAt    *string  `json:"deleted_at,omitempty"`
-	SourceRef    *string  `json:"source_ref,omitempty"`
-	Labels       []string `json:"labels,omitempty"`
-	Version      int64    `json:"v"`
+	ID           string  `json:"id"`
+	ProjectID    string  `json:"project_id"`
+	SectionID    *string `json:"section_id,omitempty"`
+	ParentID     *string `json:"parent_id,omitempty"`
+	OrderKey     string  `json:"order_key"`
+	Title        string  `json:"title"`
+	Description  string  `json:"description,omitempty"`
+	Priority     int     `json:"priority"`
+	DueDate      *string `json:"due_date,omitempty"`
+	DueTime      *string `json:"due_time,omitempty"`
+	DueTz        *string `json:"due_tz,omitempty"`
+	RRule        *string `json:"rrule,omitempty"`
+	FromComplete bool    `json:"rrule_from_completion,omitempty"`
+	StartDate    *string `json:"start_date,omitempty"`
+	Deadline     *string `json:"deadline,omitempty"`
+	DurationMin  *int    `json:"duration_min,omitempty"`
+	// AssigneeID names who does this task. It is only meaningful in a shared
+	// project, and it is empty everywhere else.
+	AssigneeID  *string  `json:"assignee_id,omitempty"`
+	State       string   `json:"state"`
+	CompletedAt *string  `json:"completed_at,omitempty"`
+	DeletedAt   *string  `json:"deleted_at,omitempty"`
+	SourceRef   *string  `json:"source_ref,omitempty"`
+	Labels      []string `json:"labels,omitempty"`
+	Version     int64    `json:"v"`
 }
 
 const taskCols = `id, project_id, section_id, parent_id, order_key, title, description, priority,
 	due_date, due_time, due_tz, rrule, rrule_from_completion, start_date, deadline, duration_min,
-	state, completed_at, deleted_at, source_ref, version`
+	assignee_id, state, completed_at, deleted_at, source_ref, version`
 
 func scanTask(rows *sql.Rows) (Task, error) {
 	var t Task
 	var fromComplete int
 	err := rows.Scan(&t.ID, &t.ProjectID, &t.SectionID, &t.ParentID, &t.OrderKey, &t.Title, &t.Description,
 		&t.Priority, &t.DueDate, &t.DueTime, &t.DueTz, &t.RRule, &fromComplete, &t.StartDate, &t.Deadline,
-		&t.DurationMin, &t.State, &t.CompletedAt, &t.DeletedAt, &t.SourceRef, &t.Version)
+		&t.DurationMin, &t.AssigneeID, &t.State, &t.CompletedAt, &t.DeletedAt, &t.SourceRef, &t.Version)
 	t.FromComplete = fromComplete == 1
 	return t, err
 }
@@ -248,19 +330,61 @@ type Delta struct {
 	Labels    []Label    `json:"labels"`
 	Tasks     []Task     `json:"tasks"`
 	Reminders []Reminder `json:"reminders"`
+	Comments  []Comment  `json:"comments"`
+	// Reset tells a client to throw away what it holds and pull from zero.
+	// A scoped pull cannot report that a row went away: when a project stops
+	// being shared, the delta simply stops carrying it, and the client would
+	// keep a copy for ever. The server therefore says so once. See
+	// withMembershipChange in account.go.
+	Reset bool `json:"reset,omitempty"`
+	// Inbox names the project that a capture with no project belongs in. Each
+	// account has its own, so a client must not assume the fixed id.
+	Inbox string `json:"inbox,omitempty"`
 }
 
-// Pull returns every row with a version above since.
+// Pull returns every row of the owner with a version above since. It is what a
+// file with one account has always answered.
 func (s *Store) Pull(since int64) (Delta, error) {
-	d := Delta{Projects: []Project{}, Sections: []Section{}, Labels: []Label{}, Tasks: []Task{}, Reminders: []Reminder{}}
+	return s.PullFor(since, OwnerID)
+}
+
+// PullFor returns every row above since that one account may see.
+//
+// The version counter stays global. A client's since is a watermark, and a row
+// it may not see is skipped, so two accounts share one ordering and neither
+// needs a counter of its own. The cost is that a client can receive a delta
+// with no rows in it, which is exactly what a quiet period looks like anyway.
+func (s *Store) PullFor(since int64, accountID string) (Delta, error) {
+	d := Delta{Projects: []Project{}, Sections: []Section{}, Labels: []Label{}, Tasks: []Task{},
+		Reminders: []Reminder{}, Comments: []Comment{}}
 	v, err := s.Version()
 	if err != nil {
 		return d, err
 	}
 	d.Version = v
 
+	moved, err := s.membershipMoved(accountID, since)
+	if err != nil {
+		return d, err
+	}
+	if moved && since > 0 {
+		// Start again. The client asked from a version before its view
+		// changed, so a delta cannot describe the difference.
+		d.Reset = true
+		since = 0
+	}
+	if a, err := s.AccountByID(accountID); err == nil {
+		d.Inbox = a.InboxID
+	}
+
+	// mine is the sub-select of the projects this account may see. Every other
+	// query in this function hangs off it, because every row belongs to a
+	// project.
+	const mine = `(SELECT id FROM project WHERE owner_id = ?
+		UNION SELECT project_id FROM project_member WHERE account_id = ?)`
+
 	rows, err := s.db.Query(`SELECT id, name, color, parent_id, order_key, is_inbox, deleted_at, version
-		FROM project WHERE version > ? ORDER BY version`, since)
+		FROM project WHERE version > ? AND id IN `+mine+` ORDER BY version`, since, accountID, accountID)
 	if err != nil {
 		return d, err
 	}
@@ -277,7 +401,7 @@ func (s *Store) Pull(since int64) (Delta, error) {
 	rows.Close()
 
 	rows, err = s.db.Query(`SELECT id, project_id, name, order_key, deleted_at, version
-		FROM section WHERE version > ? ORDER BY version`, since)
+		FROM section WHERE version > ? AND project_id IN `+mine+` ORDER BY version`, since, accountID, accountID)
 	if err != nil {
 		return d, err
 	}
@@ -291,6 +415,9 @@ func (s *Store) Pull(since int64) (Delta, error) {
 	}
 	rows.Close()
 
+	// A label is household vocabulary and it is not scoped. A name only ever
+	// shows on a task, so a person still sees a label of theirs on a task of
+	// theirs and nothing else. docs/BACKLOG.md records the limit.
 	rows, err = s.db.Query(`SELECT id, name, color, deleted_at, version FROM label WHERE version > ? ORDER BY version`, since)
 	if err != nil {
 		return d, err
@@ -305,7 +432,8 @@ func (s *Store) Pull(since int64) (Delta, error) {
 	}
 	rows.Close()
 
-	rows, err = s.db.Query(`SELECT `+taskCols+` FROM task WHERE version > ? ORDER BY version`, since)
+	rows, err = s.db.Query(`SELECT `+taskCols+` FROM task WHERE version > ? AND project_id IN `+mine+
+		` ORDER BY version`, since, accountID, accountID)
 	if err != nil {
 		return d, err
 	}
@@ -321,7 +449,30 @@ func (s *Store) Pull(since int64) (Delta, error) {
 	}
 	rows.Close()
 
-	rows, err = s.db.Query(`SELECT `+reminderCols+` FROM reminder WHERE version > ? ORDER BY version`, since)
+	// A comment hangs off a task, which hangs off a project, so the same
+	// visibility clause answers for it. A comment of a task the account cannot
+	// see never leaves the file.
+	rows, err = s.db.Query(`SELECT `+commentCols+` FROM comment
+		WHERE version > ? AND task_id IN (SELECT id FROM task WHERE project_id IN `+mine+`)
+		ORDER BY version`, since, accountID, accountID)
+	if err != nil {
+		return d, err
+	}
+	for rows.Next() {
+		c, err := scanComment(rows)
+		if err != nil {
+			rows.Close()
+			return d, err
+		}
+		d.Comments = append(d.Comments, c)
+	}
+	rows.Close()
+
+	// A reminder is personal, even on a shared task. Two people who share a
+	// chore do not want one nudge between them, and neither wants to see the
+	// other's.
+	rows, err = s.db.Query(`SELECT `+reminderCols+` FROM reminder
+		WHERE version > ? AND coalesce(account_id, ?) = ? ORDER BY version`, since, OwnerID, accountID)
 	if err != nil {
 		return d, err
 	}
@@ -379,12 +530,38 @@ func placeholders(n int) string {
 
 // Query runs a compiled filter and returns matching tasks, newest order first.
 func (s *Store) Query(where string, args []any, limit int, offset int) ([]Task, error) {
+	return s.QueryFor(where, args, limit, offset, "")
+}
+
+// scopeFor builds the visibility clause for one account, over the column that
+// names the project. An empty account reads the whole file.
+func scopeFor(accountID, column string) (string, []any) {
+	if accountID == "" {
+		return "", nil
+	}
+	return ` AND ` + column + ` IN ` + mineSQL, []any{accountID, accountID}
+}
+
+// mineSQL is the sub-select of the projects one account may see. It takes the
+// account id twice: once for what they own, once for what they were given.
+const mineSQL = `(SELECT id FROM project WHERE owner_id = ?
+	UNION SELECT project_id FROM project_member WHERE account_id = ?)`
+
+// QueryFor runs a compiled filter for one account. An empty account reads the
+// whole file, which is what a one-account tool wants.
+func (s *Store) QueryFor(where string, args []any, limit, offset int, accountID string) ([]Task, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	q := `SELECT ` + taskCols + ` FROM task WHERE deleted_at IS NULL AND (` + where + `)
+	scope := ""
+	all := append([]any{}, args...)
+	if accountID != "" {
+		scope = ` AND project_id IN ` + mineSQL
+		all = append(all, accountID, accountID)
+	}
+	q := `SELECT ` + taskCols + ` FROM task WHERE deleted_at IS NULL AND (` + where + `)` + scope + `
 		ORDER BY (due_date IS NULL), due_date, priority, order_key LIMIT ? OFFSET ?`
-	rows, err := s.db.Query(q, append(append([]any{}, args...), limit, offset)...)
+	rows, err := s.db.Query(q, append(all, limit, offset)...)
 	if err != nil {
 		return nil, err
 	}
@@ -418,8 +595,14 @@ func (s *Store) Query(where string, args []any, limit int, offset int) ([]Task, 
 
 // Projects returns every live project.
 func (s *Store) Projects() ([]Project, error) {
+	return s.ProjectsFor("")
+}
+
+// ProjectsFor returns the live projects one account may see.
+func (s *Store) ProjectsFor(accountID string) ([]Project, error) {
+	scope, scopeArgs := scopeFor(accountID, "id")
 	rows, err := s.db.Query(`SELECT id, name, color, parent_id, order_key, is_inbox, deleted_at, version
-		FROM project WHERE deleted_at IS NULL ORDER BY is_inbox DESC, order_key`)
+		FROM project WHERE deleted_at IS NULL`+scope+` ORDER BY is_inbox DESC, order_key`, scopeArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -439,8 +622,14 @@ func (s *Store) Projects() ([]Project, error) {
 
 // Sections returns every live section, ordered inside its project.
 func (s *Store) Sections() ([]Section, error) {
+	return s.SectionsFor("")
+}
+
+// SectionsFor returns the live sections of the projects one account may see.
+func (s *Store) SectionsFor(accountID string) ([]Section, error) {
+	scope, scopeArgs := scopeFor(accountID, "project_id")
 	rows, err := s.db.Query(`SELECT id, project_id, name, order_key, deleted_at, version
-		FROM section WHERE deleted_at IS NULL ORDER BY project_id, order_key, name`)
+		FROM section WHERE deleted_at IS NULL`+scope+` ORDER BY project_id, order_key, name`, scopeArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -452,6 +641,31 @@ func (s *Store) Sections() ([]Section, error) {
 			return nil, err
 		}
 		out = append(out, sec)
+	}
+	return out, rows.Err()
+}
+
+// CommentsFor returns the live comments of one task, oldest first, and only if
+// the account may see the task. An empty account reads the whole file.
+func (s *Store) CommentsFor(taskID, accountID string) ([]Comment, error) {
+	if accountID != "" {
+		if _, err := s.TaskFor(taskID, accountID); err != nil {
+			return nil, err
+		}
+	}
+	rows, err := s.db.Query(`SELECT `+commentCols+` FROM comment
+		WHERE task_id = ? AND deleted_at IS NULL ORDER BY created_at, id`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Comment{}
+	for rows.Next() {
+		c, err := scanComment(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
 	}
 	return out, rows.Err()
 }
@@ -475,6 +689,25 @@ func (s *Store) Labels() ([]Label, error) {
 }
 
 // Task returns one task by id.
+// TaskFor returns one task, and only if the account may see it.
+func (s *Store) TaskFor(id, accountID string) (Task, error) {
+	t, err := s.Task(id)
+	if err != nil {
+		return t, err
+	}
+	if accountID == "" {
+		return t, nil
+	}
+	ok, err := s.CanSee(accountID, t.ProjectID)
+	if err != nil {
+		return Task{}, err
+	}
+	if !ok {
+		return Task{}, ErrDenied
+	}
+	return t, nil
+}
+
 func (s *Store) Task(id string) (Task, error) {
 	rows, err := s.db.Query(`SELECT `+taskCols+` FROM task WHERE id = ?`, id)
 	if err != nil {
@@ -520,10 +753,27 @@ var ErrNotFound = errors.New("not found")
 
 // Search runs the full-text index and returns task ids in rank order.
 func (s *Store) Search(text string, limit int) ([]string, error) {
+	return s.SearchFor(text, limit, "")
+}
+
+// SearchFor is Search for one account. An empty account reads the whole file.
+//
+// The scope is on the query and not on the caller. A search that read the
+// index and then filtered the rows it found would still tell the caller how
+// many matches it threw away, through the number it returns.
+func (s *Store) SearchFor(text string, limit int, accountID string) ([]string, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.db.Query(`SELECT task_id FROM task_fts WHERE task_fts MATCH ? ORDER BY rank LIMIT ?`, text, limit)
+	scope := ""
+	args := []any{text}
+	if accountID != "" {
+		scope = ` AND task_id IN (SELECT id FROM task WHERE project_id IN ` + mineSQL + `)`
+		args = append(args, accountID, accountID)
+	}
+	args = append(args, limit)
+	rows, err := s.db.Query(`SELECT task_id FROM task_fts WHERE task_fts MATCH ?`+scope+
+		` ORDER BY rank LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}

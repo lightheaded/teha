@@ -17,7 +17,7 @@ import java.util.concurrent.TimeUnit
 class ApiError(message: String, val unauthorized: Boolean = false) : IOException(message)
 
 /**
- * ApiClient speaks the two routes the app needs.
+ * ApiClient speaks the routes the app needs.
  *
  * The token goes on every request. A missing or wrong token returns 401 with a
  * WWW-Authenticate header, and the caller turns that into one clear line about
@@ -61,6 +61,29 @@ class ApiClient(private val settings: Settings) {
         json.decodeFromString(SyncResponse.serializer(), body)
     }
 
+    /**
+     * join redeems an invitation code and returns the new device token.
+     *
+     * This is the one call that carries no token: the phone has none yet, and
+     * the code is the credential. The server answers the token once.
+     */
+    suspend fun join(code: String, name: String): JoinResponse = withContext(Dispatchers.IO) {
+        val payload = json.encodeToString(JoinRequest.serializer(), JoinRequest(code.trim(), name.trim()))
+        val body = call(
+            Request.Builder()
+                .url(url("/v1/join"))
+                .post(payload.toRequestBody(JSON_MEDIA)),
+            withToken = false,
+        )
+        json.decodeFromString(JoinResponse.serializer(), body)
+    }
+
+    /** household reads who is in the house. Every account may ask. */
+    suspend fun household(): HouseholdResponse = withContext(Dispatchers.IO) {
+        val body = call(Request.Builder().url(url("/v1/household")).get())
+        json.decodeFromString(HouseholdResponse.serializer(), body)
+    }
+
     private fun url(path: String): String {
         val base = settings.serverUrl
         if (base.isEmpty()) throw ApiError("Set the server address in settings.")
@@ -70,14 +93,17 @@ class ApiClient(private val settings: Settings) {
         return base + path
     }
 
-    private fun call(builder: Request.Builder): String {
+    private fun call(builder: Request.Builder, withToken: Boolean = true): String {
         val token = settings.token
-        if (token.isNotEmpty()) builder.header("Authorization", "Bearer $token")
+        if (withToken && token.isNotEmpty()) builder.header("Authorization", "Bearer $token")
         builder.header("Accept", "application/json")
         http.newCall(builder.build()).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (response.code == 401) {
-                throw ApiError("The server refused the token.", unauthorized = true)
+                // The same code answers a wrong device token and a wrong
+                // invitation code, so the message names what the caller sent.
+                val what = if (withToken) "token" else "invitation code"
+                throw ApiError("The server refused the $what.", unauthorized = withToken)
             }
             if (!response.isSuccessful) {
                 throw ApiError("The server answered ${response.code}. ${shorten(text)}")

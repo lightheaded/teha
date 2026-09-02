@@ -639,3 +639,266 @@ clears itself after it adds a task.
 
 **Reverses if:** passkeys replace the device token, which removes the secret
 this decision protects. The address stays in the file either way.
+
+---
+
+## D-016 — Two accounts live in one file, and visibility hangs off the project
+
+**Date:** 2026-08-31 · **Status:** done
+
+One SQLite file holds the household: the owner, and every person the owner
+invites. A project belongs to one account and is shared with none or more
+others. Every other row hangs off a project, so one question decides
+everything: may this account see this project?
+
+**Why.** The alternative was one file per account, which §4 of the plan names
+for the hosted build. Two files cannot share a shopping list without a second
+sync protocol between them, and the shopping list is the whole point of
+milestone M6. One file needs no protocol: a shared row is one row.
+
+**Cost.** Every read and every write now names an account. `Pull` became
+`PullFor`, `Apply` became `ApplyAs`, and a gate in `internal/store/reach.go`
+answers "which projects does this command touch?" before any command runs. A
+route that forgot to ask would hand one person the other person's list, so the
+guard resolves the account once and puts it on the request.
+
+**Consequence.**
+
+- The version counter stays global. A client's `since` is a watermark, and a
+  row it may not see is skipped. Two accounts share one ordering, and neither
+  needs a counter of its own.
+- A scoped pull cannot say that a row went away. When a list stops being
+  shared, the delta simply stops carrying it. The server therefore records the
+  version of every membership change and answers `"reset": true` to a pull from
+  before it, which means "throw away what you hold and pull from zero".
+- Each account has its own inbox, because an inbox is the most private list
+  there is. `store.InboxID` is the owner's. Every client reads its own from the
+  sync answer, and `filter.Schema.InboxID` carries it into `#inbox`.
+- A reminder and a push subscription belong to a person, not to a task or to
+  the file. Two people who share a chore each keep their own nudge, or none.
+- A label is household vocabulary and it is not scoped. A name only ever shows
+  on a task, so a person sees a label of theirs on a task of theirs. The limit
+  is in [BACKLOG.md](BACKLOG.md).
+- The owner of a list is the only one who may rename it, delete it or pass it
+  on. A member works inside it.
+
+**Reverses if:** the hosted build arrives, where one file per tenant is the
+isolation boundary that matters. A household is then one tenant and this
+decision holds inside it.
+
+---
+
+## D-017 — An invitation is a code with its own hash, and never the device token
+
+**Date:** 2026-08-31 · **Status:** done
+
+The owner writes an invitation with a name on it. The server answers with a
+code once, keeps only its hash, and the code works for one person and for seven
+days. Redeeming it makes an account, an inbox and a device token of its own.
+
+**Why.** The token was the only way in until now, and [BACKLOG.md](BACKLOG.md)
+recorded the cost: a token that is shared to invite somebody is a token that
+has to be replaced afterwards, on every device that holds it. An invitation is
+the credential that is meant to be sent.
+
+**Cost.** A table, a route with no guard on it, and a lockout on that route.
+The code is 160 random bits in base32, so a guess is not worth trying, and the
+same lockout that guards a passkey login counts a failure here.
+
+**Consequence.** A session now lives in the database rather than in memory, for
+two reasons: a restart no longer signs every browser out, and a session must
+name which account it belongs to. The device token of each account lives beside
+it as a hash, so one lookup answers "who is this?" for the owner and for
+everybody else. The token in the configuration is the owner's, and the server
+writes it into the owner's row at start-up.
+
+**Reverses if:** the hosted build needs a real signup, which is a different
+flow with an address to confirm.
+
+---
+
+## D-018 — The browser reads the filter grammar itself, held to the server by a corpus
+
+**Date:** 2026-08-31 · **Status:** done
+
+`internal/webui/assets/filter.js` is a second implementation of the filter
+language: the same lexer, the same parser, and predicates over the rows the
+browser holds instead of a `WHERE` clause. `parser-fixtures/filter.json` holds
+one account, seventy queries and one answer each. The Go test writes those
+answers by running real SQLite, and the web test demands the same ones.
+
+**Why.** The browser knew a subset of the grammar and turned an unknown term
+into a title search, so a view could quietly show the wrong rows.
+
+Two ways were open. WebAssembly of the shared package removes the second
+implementation by construction, and it costs 900 kilobytes compressed in an
+app that must start with no network. It also does not remove the work: the
+browser holds objects and not SQL, so a row evaluator had to be written either
+way. A second evaluator with a shared corpus is the pattern this repository
+already trusts for the quick add parser, and it costs nothing to load.
+
+**Cost.** Two implementations to keep in step, and one corpus that must grow
+with every new term. The corpus is the contract, so a term that is added to one
+side and not the other fails the build.
+
+**Consequence.**
+
+- The browser answers every term the server answers, `created:` apart, because
+  the sync payload carries no creation date. It says so in a sentence, exactly
+  as the phone does for a section term.
+- The web app has a filter field, so a person can type any query. `/` focuses
+  it.
+- `#Trip` is now an exact name in the browser, as it is on the server. The
+  prefix form is `#Trip*`. Quick add still resolves a project by a unique
+  prefix, which is a different question asked at a different moment.
+
+**Reverses if:** a third client needs the grammar in a third language. The
+answer then is WebAssembly for every client that can load it, and the corpus
+stays either way.
+
+---
+
+## D-019 — The server checkpoints the write-ahead log, because the backup replicates the file
+
+**Date:** 2026-08-31 · **Status:** done
+
+The server runs `PRAGMA wal_checkpoint(PASSIVE)` every ten seconds, and once
+more on a clean stop. `-checkpoint-interval` sets the period.
+
+**Why.** `scripts/restore-drill.sh` rehearsed a restore for the first time and
+it failed. Litestream replicated the database as it stood when it attached, and
+nothing after it. The cause is not Litestream: the server holds one long-lived
+connection, so SQLite leaves a write in the write-ahead log, and SQLite moves
+the log into the file only when it grows past about four megabytes. For two
+people that is days of work, and the restore lost all of it while the backup
+looked healthy.
+
+**Cost.** One write of the log into the file every ten seconds. PASSIVE gives
+up at once when a reader is in the way, so a checkpoint never blocks the person
+typing, and the next tick tries again.
+
+**Consequence.** A restore can lose at most one interval of work. The drill is
+the test, and it fails loudly without the checkpoint. `docs/DEPLOY.md` says not
+to turn it off, and says why.
+
+**Reverses if:** Litestream reads the write-ahead log of a live writer in a
+later version. The drill is how that will be found out.
+
+---
+
+## D-020 — A comment is a row with an author, and only the author changes it
+
+**Date:** 2026-09-02 · **Status:** done
+
+A comment is a row in `comment`: an id, the task, the author, the body, and the
+three stamps with the version counter. Anybody who can see the task can read
+the talk and add a line. Only the author can change or remove their own line.
+
+The `comment:` term in the filter grammar now reads that table. A store with no
+comment table refuses the term with one sentence, and the phone is that store
+today.
+
+A write also tells the other people in the household. `Store.ApplyWithEvents`
+returns a list of facts, `internal/push` turns each fact into the words of a
+notification, and the two things that produce one are an assignment and a
+comment.
+
+**Why.** §6.3 of [PLAN.md](PLAN.md) counts "query comment text" as a gap that
+teha closes, and the term searched the description until now. That was the
+right stand-in while a comment lived in a description, and it is an answer that
+is close and wrong once a comment is a row. The author matters because two
+people share a list: a comment with no author reads as if the household said
+it, and a line that anybody can edit is not a conversation.
+
+The store reports the fact and never the words, so the wording of a
+notification lives with the transport that sends it and a second transport
+needs no second copy of the store.
+
+**Cost.** One more table in every pull, and one more list in the client state.
+The full-text index holds no comment text, so `search:` and `comment:` mean two
+different things: the index is written on a task change, and adding comment
+text to it means rewriting the row of a task whenever anybody says anything.
+[BACKLOG.md](BACKLOG.md) records that.
+
+An event is sent and forgotten. A reminder is claimed in the database first,
+because it fires from a timer that can run twice (D-010). An event has already
+happened once, inside one transaction, so there is nothing to claim.
+
+**Consequence.** The importer writes a Todoist comment as a row and keeps its
+posting time, so a conversation arrives in order. A task an earlier import
+wrote keeps the "Comments:" block in its description, because the importer
+matches by `source_ref` and keeps the row it has.
+
+**Reverses if:** a comment needs to reach somebody outside the household, which
+is a different model and a different table.
+
+---
+
+## D-021 — Shopping mode is the section table and the history, not a new schema
+
+**Date:** 2026-09-02 · **Status:** done
+
+Shopping mode is a layout of a project view. An aisle is a section of that
+project. The suggestions are the completed tasks of the same project. The aisle
+of a new item is copied from the newest task of the same name that has one.
+
+**Why.** §4 of [PLAN.md](PLAN.md) asks for loose categories that a person can
+drag, and not a map of a shop. A section is already a heading a person can
+rename, reorder and drag, and it is already in every client. A category table
+beside it would be a second heading with the same job.
+
+"Learned from history" is one lookup by name. A household buys the same forty
+things, so the newest match is right almost every time, and a person who moves
+an item teaches the next one with no other machinery.
+
+**Cost.** A shopping list must have sections to have aisles, and somebody makes
+them once. An item nobody has bought before lands under "Anything else".
+
+The basket is a window of twelve hours, plus whatever a person cleared. Without
+the window a list used for a year would open with a year of shopping in it.
+
+**Consequence.** No schema change, and no second grouping to keep in step with
+the board. `docs/screenshots/shop.png` is the phone-width image, and
+`scripts/screenshots.mjs` also fails the build if the layout scrolls sideways or
+if a check target shrinks below a thumb at 320 pixels.
+
+**Reverses if:** a real aisle order per shop turns out to matter, which is a
+per-shop map and the burden §4 declined.
+
+---
+
+## D-022 — The browser keeps its copy in IndexedDB, not in SQLite in OPFS
+
+**Date:** 2026-09-02 · **Status:** done
+
+The web app keeps its local copy in IndexedDB: one object store per table, keyed
+by the row id, plus one small record for what belongs to the device. A write
+marks one row and a timer writes the batch. `localStorage` is the fallback for a
+browser that refuses IndexedDB, and it keeps the old single string.
+
+This is a change of plan. §4 and §5 of [PLAN.md](PLAN.md) name wa-sqlite in
+OPFS with an IndexedDB fallback.
+
+**Why.** The shortcut that had to go was the single `localStorage` string: about
+five megabytes of quota, rewritten whole on every keystroke. IndexedDB answers
+both halves of that, and it answers them with no new dependency.
+
+SQLite in the browser buys a query engine, and the browser has no use for one.
+The rows are already in memory because the renderer walks them, and the filter
+grammar is evaluated in JavaScript over those rows and held to the server by a
+corpus (D-018). So the wasm would cost about a megabyte in the repository and
+in the binary, plus a worker and a build step, and it would not remove one line
+of the evaluator.
+
+**Cost.** The first paint waits for an asynchronous read rather than a
+synchronous one, which is one tick. Nothing in the browser can run SQL, so a
+query the server compiles to SQL is still evaluated row by row here.
+
+**Consequence.** A device that used the old string moves to the new database
+once, at the next start, and the old key is removed: two copies of one account
+on one device is the bug this fixes. Node has no IndexedDB, so
+`internal/webui/assets/db.test.mjs` drives the layer through a backend of its
+own, and `scripts/screenshots.mjs` proves the real binding in a real browser.
+
+**Reverses if:** the browser needs to answer a query it cannot hold in memory,
+which is the point at which a query engine earns its megabyte.

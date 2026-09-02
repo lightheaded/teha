@@ -71,6 +71,7 @@ func main() {
 		vapidPub  = flag.String("vapid-public", os.Getenv("TEHA_VAPID_PUBLIC_KEY"), "the VAPID public key. Push stays off without it and without TEHA_VAPID_PRIVATE_KEY")
 		vapidSub  = flag.String("vapid-subject", envOr("TEHA_VAPID_SUBJECT", "https://github.com/lightheaded/teha"), "the VAPID subject: a mailto: address or an https: URL that a push service can use to reach the operator")
 		pushEvery = flag.Duration("push-interval", 30*time.Second, "how often the reminder scheduler looks for due reminders")
+		ckptEvery = flag.Duration("checkpoint-interval", 10*time.Second, "how often the write-ahead log is written into the database file. This is what a backup replicates from: see scripts/restore-drill.sh. Zero turns it off")
 	)
 	flag.Parse()
 
@@ -162,7 +163,9 @@ func main() {
 	// in. Turn it on with -mcp or TEHA_MCP=1.
 	if *mcpOn {
 		mcpSrv := mcpsrv.New(st, apiSrv)
-		h := withBearer(tok, mcpSrv.HTTP())
+		// The same rule as every other route: the token names the account, so
+		// an invited person can drive an agent against their own lists.
+		h := apiSrv.GuardHandler(mcpSrv.HTTP())
 		// Both forms. A client that appends a slash must not get a 404 from the
 		// web app's catch-all handler and then report a broken server.
 		mux.Handle("/mcp", h)
@@ -186,6 +189,28 @@ func main() {
 		go sender.Run(ctx)
 	}
 
+	// The checkpoint loop. A backup replicates the database file, and one
+	// long-lived connection leaves a write in the write-ahead log until SQLite
+	// decides to move it, which is a matter of megabytes and not of seconds.
+	// This bounds what a restore can lose to one interval. Proven by
+	// scripts/restore-drill.sh, which fails without it.
+	if *ckptEvery > 0 {
+		go func() {
+			t := time.NewTicker(*ckptEvery)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					if err := st.Checkpoint(); err != nil {
+						log.Warn("the checkpoint did not run", "err", err)
+					}
+				}
+			}
+		}()
+	}
+
 	go func() {
 		log.Info("teha is listening", "addr", *addr, "db", *dbPath, "auth", tok != "")
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -199,6 +224,11 @@ func main() {
 	shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutCtx)
+	// One last checkpoint, so a planned stop leaves nothing in the log for a
+	// backup to miss.
+	if err := st.Checkpoint(); err != nil {
+		log.Warn("the last checkpoint did not run", "err", err)
+	}
 }
 
 // webHandler serves the web app. An unauthenticated browser goes to the login
@@ -254,24 +284,6 @@ func loginHandler(token string) http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(data)
 	}
-}
-
-// withBearer guards the MCP endpoint. An MCP client sends a bearer header, so
-// no cookie path is needed here.
-func withBearer(token string, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if token == "" {
-			next.ServeHTTP(w, r)
-			return
-		}
-		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if got == token {
-			next.ServeHTTP(w, r)
-			return
-		}
-		w.Header().Set("WWW-Authenticate", `Bearer realm="teha"`)
-		http.Error(w, "a token is required", http.StatusUnauthorized)
-	})
 }
 
 func logRequests(log *slog.Logger, next http.Handler) http.Handler {

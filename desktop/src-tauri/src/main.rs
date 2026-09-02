@@ -66,9 +66,9 @@ fn main() {
         .setup(|app| {
             let handle = app.handle().clone();
 
-            // A menu bar application, not a Dock application. The window that
-            // hosts the web app takes the Dock icon back when it opens.
-            policy::accessory(&handle);
+            // A regular application, with a Dock icon at all times. A click on
+            // the icon reaches the reopen event below.
+            policy::regular(&handle);
 
             let current = settings::load(&handle);
             let accelerator = current
@@ -100,8 +100,23 @@ fn main() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("the teha desktop shell did not start");
+        .build(tauri::generate_context!())
+        .expect("the teha desktop shell did not start")
+        .run(|app, event| {
+            // A click on the Dock icon, or a second open from the Finder, while
+            // no window of the shell is on the screen. A regular application
+            // answers with its window, so this one answers with the web app.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen {
+                has_visible_windows: false,
+                ..
+            } = event
+            {
+                web::show(app);
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (app, event);
+        });
 }
 
 /// Act on one `teha://` URL.

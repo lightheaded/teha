@@ -261,12 +261,44 @@ holds no endpoint, no bucket name and no credential. Litestream expands each
 The 0.5 line replicates one database to one replica. The configuration
 therefore holds one `replica` block.
 
-To list the snapshots in the bucket, run this command:
+To list what the replica holds, run this command:
 
 ```sh
 docker compose run --rm --entrypoint litestream litestream \
-  snapshots -config /etc/litestream.yml /data/teha.db
+  ltx -config /etc/litestream.yml /data/teha.db
 ```
+
+The 0.5 line has no `snapshots` command. It writes LTX files, and `ltx` lists
+them with the transaction id of each one.
+
+### The checkpoint, and why the server runs one
+
+Litestream replicates the **database file**. The server holds one long-lived
+connection, so SQLite writes into the write-ahead log and moves it into the
+file only when the log grows past about four megabytes. For a household that
+is days of work, and a restore would lose all of it.
+
+The server therefore checkpoints every ten seconds, and once more on a clean
+stop. `-checkpoint-interval` sets the period, and `0` turns it off. A restore
+can lose at most one interval of work.
+
+Do not turn it off. `scripts/restore-drill.sh` fails without it, and the way it
+fails is silent: the backup looks healthy and the restore is old.
+
+### Rehearse the restore
+
+```sh
+scripts/restore-drill.sh
+```
+
+The drill starts its own MinIO, its own bucket and its own database in Docker,
+writes through the API, destroys the file, restores it and compares. It reaches
+no real deployment and it removes everything it made. Run it after any change
+to `deploy/litestream.yml`, to the compose file or to the pinned Litestream
+version.
+
+Last run: it passes. Every row and the account version came back, and the
+restored file took a new write.
 
 ## Restore from a Litestream backup
 

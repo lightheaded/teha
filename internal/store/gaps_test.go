@@ -23,8 +23,8 @@ import (
 var gapsToday = time.Date(2026, 8, 25, 9, 0, 0, 0, time.UTC)
 
 // gapStore builds one small account that holds every shape the three gaps
-// need: a parent with sub-tasks, a completed task, and a task whose comment
-// text lives in the description.
+// need: a parent with sub-tasks, a completed task, and a task that carries a
+// comment.
 func gapStore(t *testing.T) *Store {
 	t.Helper()
 	s := openStoreAt(t, filepath.Join(t.TempDir(), "gaps.db"))
@@ -46,11 +46,13 @@ func gapStore(t *testing.T) *Store {
 		mkCmd("g6", "task_add", TaskArgs{ID: "t_loud", Title: ptr("Fix the roof felt"),
 			ProjectID: ptr("p_trip"), ParentID: ptr("t_quiet"), Priority: ptr(1)}),
 
-		// A task with a comment folded into its description, which is where a
-		// comment lives until the comment table exists.
+		// A task and a comment on it. A comment is a row of its own, so the
+		// description stays empty here: that is what makes the two roads to the
+		// row, `comment:` and `search:`, tell the difference below.
 		mkCmd("g7", "task_add", TaskArgs{ID: "t_comment", Title: ptr("Call the yard"),
-			ProjectID:   ptr("p_trip"),
-			Description: ptr("Comments:\n- The gate code is behind the meter.")}),
+			ProjectID: ptr("p_trip")}),
+		mkCmd("g7b", "comment_add", CommentArgs{ID: "c_gate", TaskID: ptr("t_comment"),
+			Body: ptr("The gate code is behind the meter.")}),
 
 		// A completed task and a task nobody will do.
 		mkCmd("g8", "task_add", TaskArgs{ID: "t_done", Title: ptr("Renew the card"),
@@ -103,10 +105,12 @@ func TestGapOneAQueryReachesCommentText(t *testing.T) {
 	if got, w := strings.Join(ask(t, s, "comment: gate code"), " "), want("t_comment"); got != w {
 		t.Errorf("comment: gate code returned %q, want %q", got, w)
 	}
-	// The plain search also reaches it, because a comment is in the
-	// description. Both roads have to lead to the same row.
-	if got, w := strings.Join(ask(t, s, "search: gate code"), " "), want("t_comment"); got != w {
-		t.Errorf("search: gate code returned %q, want %q", got, w)
+	// `search:` reads the title and the description, and a comment is neither,
+	// so it must NOT find this row. The two terms mean two things now that a
+	// comment is a row: docs/BACKLOG.md records that the full-text index holds
+	// no comment text.
+	if got := ask(t, s, "search: gate code"); len(got) != 0 {
+		t.Errorf("search: gate code returned %v, and a comment is not a description", got)
 	}
 	// A comment search must not answer with a title match, or the term means
 	// two things at once.
@@ -190,7 +194,7 @@ func TestGapThreeAParentComesWithItsSubtasks(t *testing.T) {
 	}
 
 	// A task with no family answers with itself alone.
-	if got, w := strings.Join(ask(t, s, "with subtasks: search: gate code"), " "),
+	if got, w := strings.Join(ask(t, s, "with subtasks: comment: gate code"), " "),
 		want("t_comment"); got != w {
 		t.Errorf("with subtasks over a lone task returned %q, want %q", got, w)
 	}

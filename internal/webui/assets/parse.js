@@ -41,16 +41,39 @@ const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'frida
 const WD_SHORT = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
+// reProtect matches a span that no other pattern may read: a Markdown link, a
+// code span, a quoted phrase and a bare URL. A URL carries dots and digits
+// that look like a date, and a person who quotes a phrase means the words, not
+// the date inside them. Section 6.4 of docs/PLAN.md states the quoting rule.
+const RE_PROTECT = /\[[^\]\n]*\]\([^)\s]*\)|`[^`\n]+`|"[^"\n]*"|(?:https?:\/\/|mailto:)\S+/gi;
+
+// mask covers every protected span with a character that no pattern matches.
+// One character replaces one character, so a match index in the masked line
+// points at the same place in the real line.
+function mask(s) {
+  return s.replace(RE_PROTECT, (m) => '\u0001'.repeat(m.length));
+}
+
 export function parseQuickAdd(text, today = new Date()) {
-  const out = { title: '', labels: [], priority: 0, project: '', due: '', time: '', rrule: '', parsed: [] };
+  const out = { title: '', labels: [], priority: 0, project: '', due: '', time: '', rrule: '',
+    remindAt: '', remindBefore: 0, parsed: [] };
   let rest = ` ${text} `;
+  // masked holds the same characters with every protected span blanked out.
+  // Every pattern matches against masked, and every string comes out of rest.
+  let masked = mask(rest);
 
   const eat = (re, fn) => {
-    const m = rest.match(re);
+    const m = masked.match(re);
     if (!m) return false;
-    if (fn(m) === false) return false;
+    // The groups must come from the real line, not from the masked one.
+    const real = rest.slice(m.index, m.index + m[0].length);
+    // A protected span never matches, so no group ever falls inside one.
+    const hit = [real, ...m.slice(1)];
+    hit.index = m.index;
+    if (fn(hit) === false) return false;
     rest = rest.slice(0, m.index) + ' ' + rest.slice(m.index + m[0].length);
-    out.parsed.push(m[0].trim());
+    masked = masked.slice(0, m.index) + ' ' + masked.slice(m.index + m[0].length);
+    out.parsed.push(real.trim());
     return true;
   };
 
@@ -71,6 +94,19 @@ export function parseQuickAdd(text, today = new Date()) {
       out.rrule = `FREQ=WEEKLY;BYDAY=${['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'][i]}`;
       if (!out.due) out.due = nextWeekday(today, i);
     }
+    return true;
+  });
+
+  // a reminder, before the clock: "remind me at 8" is not a due time.
+  eat(/\bremind(?:er)?(?:\s+me)?\s+(?:at\s+)?([01]?\d|2[0-3]):([0-5]\d)\b/i, (m) => {
+    out.remindAt = `${String(m[1]).padStart(2, '0')}:${m[2]}`; return true;
+  }) || eat(/\bremind(?:er)?(?:\s+me)?\s+at\s+([01]?\d|2[0-3])\s*(am|pm)?\b/i, (m) => {
+    let h = Number(m[1]);
+    if (m[2] && m[2].toLowerCase() === 'pm' && h < 12) h += 12;
+    out.remindAt = `${String(h).padStart(2, '0')}:00`; return true;
+  }) || eat(/\bremind(?:er)?(?:\s+me)?\s+(\d+)\s*(minutes|minute|mins|min|hours|hour|hrs|hr|days|day|m|h|d)\s+(?:before|early|ahead)\b/i, (m) => {
+    const unit = m[2].toLowerCase()[0];
+    out.remindBefore = Number(m[1]) * (unit === 'h' ? 60 : unit === 'd' ? 1440 : 1);
     return true;
   });
 

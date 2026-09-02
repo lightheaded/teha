@@ -52,6 +52,10 @@ import io.github.lightheaded.teha.data.db.ProjectEntity
 fun ViewDrawerSheet(
     current: TaskView,
     projects: List<ProjectEntity>,
+    // people is the household. "Assigned to me" only means something once two
+    // people share a list, so the row appears with the second person, exactly
+    // as it does in the browser sidebar.
+    people: Int,
     filterError: String?,
     onPick: (TaskView) -> Unit,
     onFilter: (String) -> Boolean,
@@ -94,6 +98,12 @@ fun ViewDrawerSheet(
             )
             BUILT_IN_VIEWS.forEach { view ->
                 DrawerRow(view.title, view.query == current.query) { onPick(view) }
+            }
+            if (people > 1) {
+                DrawerRow(
+                    ASSIGNED_TO_ME.title,
+                    ASSIGNED_TO_ME.query == current.query,
+                ) { onPick(ASSIGNED_TO_ME) }
             }
             if (named.isNotEmpty()) {
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp))

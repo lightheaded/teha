@@ -5,6 +5,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -45,22 +46,32 @@ type Server struct {
 
 	// sessMu guards the passkey state below. It is separate from mu, because
 	// the event fan-out and a login must not wait for each other.
+	//
+	// A session is not here any more: it lives in the database, so a restart
+	// keeps a browser signed in and a session can name its account.
 	sessMu       sync.Mutex
-	sessions     map[string]webSession
 	ceremonies   map[string]ceremony
 	failures     map[string]*failCount
 	accountFails failCount
 }
 
 // New builds a server.
+//
+// The token in the configuration belongs to the owner. It is written into the
+// owner's account row so that one lookup answers "who is this?" for every
+// account, the owner included. An empty token takes the row's token away, so a
+// server started with no token accepts none.
 func New(s *store.Store, token string, log *slog.Logger) *Server {
-	return &Server{
+	srv := &Server{
 		Store: s, Token: token, Log: log, Now: time.Now,
 		watchers:   map[chan int64]struct{}{},
-		sessions:   map[string]webSession{},
 		ceremonies: map[string]ceremony{},
 		failures:   map[string]*failCount{},
 	}
+	if err := s.SetAccountToken(store.OwnerID, token); err != nil {
+		log.Error("cannot record the owner token", "err", err)
+	}
+	return srv
 }
 
 // Routes returns the HTTP handler for the API.
@@ -79,6 +90,7 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("POST /v1/push/test", s.guard(s.handlePushTest))
 	mux.HandleFunc("GET /v1/health", s.handleHealth)
 	s.passkeyRoutes(mux)
+	s.householdRoutes(mux)
 	return mux
 }
 
@@ -103,8 +115,11 @@ func (s *Server) guard(h http.HandlerFunc) http.HandlerFunc {
 			h(w, r)
 			return
 		}
-		if s.tokenAuthorized(r) || s.sessionValid(r) {
-			h(w, r)
+		// Resolve the account once, here, and carry it on the request. A
+		// handler that answered for the owner because it forgot to ask would
+		// hand one person another person's list.
+		if a, ok := s.caller(r); ok {
+			h(w, r.WithContext(context.WithValue(r.Context(), callerKey, a)))
 			return
 		}
 		s.denied(w)
@@ -183,6 +198,16 @@ type syncResponse struct {
 	// Reminders travel with every other row. A reminder is account data, so a
 	// client sees its own reminders on every device.
 	Reminders []store.Reminder `json:"reminders"`
+	// Comments travel with the tasks they hang off, so a client shows a
+	// conversation with no second request.
+	Comments []store.Comment `json:"comments"`
+	// Reset tells the client to throw away what it holds and pull from zero.
+	// It arrives when a shared list stopped being shared. See store.Delta.
+	Reset bool `json:"reset,omitempty"`
+	// Inbox and Me name the account that is asking. Each account has its own
+	// inbox, so a client must read the id rather than assume the fixed one.
+	Inbox string `json:"inbox,omitempty"`
+	Me    string `json:"me,omitempty"`
 }
 
 func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
@@ -201,15 +226,21 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	//   Expected start of the array '[', but had 'n' instead at path: $.applied
 	// A list field in this API is always a list, never null.
 	results := []store.Result{}
+	me, ok := s.mustCaller(w, r)
+	if !ok {
+		return
+	}
 	var err error
 	if len(req.Commands) > 0 {
-		_, results, err = s.Store.Apply(req.Commands)
+		var events []store.Event
+		_, results, events, err = s.Store.ApplyWithEvents(req.Commands, me.ID)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		s.Deliver(events)
 	}
-	delta, err := s.Store.Pull(req.Since)
+	delta, err := s.Store.PullFor(req.Since, me.ID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -222,7 +253,28 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		Projects: orEmpty(delta.Projects), Sections: orEmpty(delta.Sections),
 		Labels: orEmpty(delta.Labels),
 		Tasks:  orEmpty(delta.Tasks), Reminders: orEmpty(delta.Reminders),
+		Comments: orEmpty(delta.Comments),
+		Reset:    delta.Reset, Inbox: delta.Inbox, Me: me.ID,
 	})
+}
+
+// Deliver tells the other people in the household what a write did.
+//
+// It runs in its own goroutine, because a push service can take a second and
+// the person who wrote the row is waiting for their answer. Nothing depends on
+// the result: a notification that fails is a notification the person does not
+// get, and the row is already saved.
+func (s *Server) Deliver(events []store.Event) {
+	if len(events) == 0 || s.Push == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if _, err := s.Push.SendEvents(ctx, events); err != nil {
+			s.Log.Error("cannot send a notification", "err", err)
+		}
+	}()
 }
 
 // orEmpty turns a nil slice into an empty one, so that a list field never
@@ -241,12 +293,16 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("filter")
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	where, args, err := filter.Compile(q, s.Now())
+	me, ok := s.mustCaller(w, r)
+	if !ok {
+		return
+	}
+	where, args, err := filter.CompileFor(q, s.Now(), schemaFor(me))
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	tasks, err := s.Store.Query(where, args, limit, offset)
+	tasks, err := s.Store.QueryFor(where, args, limit, offset, me.ID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -257,8 +313,23 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasks, "filter": q})
 }
 
+// schemaFor names the account that is asking, so that `#inbox` reaches that
+// person's inbox and `assigned to: me` reaches that person.
+func schemaFor(me store.Account) filter.Schema {
+	sc := filter.ServerSchema
+	sc.Me = me.ID
+	if me.InboxID != "" {
+		sc.InboxID = me.InboxID
+	}
+	return sc
+}
+
 func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
-	ps, err := s.Store.Projects()
+	me, ok := s.mustCaller(w, r)
+	if !ok {
+		return
+	}
+	ps, err := s.Store.ProjectsFor(me.ID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -267,7 +338,11 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSections(w http.ResponseWriter, r *http.Request) {
-	secs, err := s.Store.Sections()
+	me, ok := s.mustCaller(w, r)
+	if !ok {
+		return
+	}
+	secs, err := s.Store.SectionsFor(me.ID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -276,6 +351,9 @@ func (s *Server) handleSections(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLabels(w http.ResponseWriter, r *http.Request) {
+	// A label is household vocabulary and it is not scoped to an account. A
+	// name only ever shows on a task, so nobody reads a label they have no
+	// task for. See D-016 and docs/BACKLOG.md.
 	ls, err := s.Store.Labels()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -285,7 +363,13 @@ func (s *Server) handleLabels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
-	delta, err := s.Store.Pull(0)
+	me, ok := s.mustCaller(w, r)
+	if !ok {
+		return
+	}
+	// An export carries what the person can see, and nothing of the other
+	// account. Two people in one file each take their own copy out.
+	delta, err := s.Store.PullFor(0, me.ID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

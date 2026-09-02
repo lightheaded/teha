@@ -18,21 +18,18 @@ import (
 
 // --- gap one: query comment text --------------------------------------------
 
-// TestGapOneCommentTextIsSearchable covers the first gap as far as the schema
-// allows today.
+// TestGapOneCommentTextIsSearchable covers the first gap.
 //
-// There is no comment table. The importer folds a Todoist comment into the
-// description, and so does every client, so the description is where comment
-// text lives and `comment:` searches it. The term exists so that a saved
-// filter says what it means, and so that the day the table arrives there is
-// one place to change. docs/BACKLOG.md records the table.
+// A comment is a row of its own, so the term reads the comment table. It read
+// the description while a comment lived there, and internal/store/gaps_test.go
+// holds the half that runs the SQL against real rows.
 func TestGapOneCommentTextIsSearchable(t *testing.T) {
 	for _, query := range []string{"comment: fridge", "note: fridge"} {
 		sql, args, err := Compile(query, today)
 		if err != nil {
 			t.Fatalf("%q: %v", query, err)
 		}
-		if !strings.Contains(sql, "lower(description) LIKE ?") {
+		if !strings.Contains(sql, "SELECT task_id FROM comment WHERE lower(body) LIKE ?") {
 			t.Errorf("%q compiled to %q, which does not reach the comment text", query, sql)
 		}
 		if len(args) != 1 || args[0] != "%fridge%" {

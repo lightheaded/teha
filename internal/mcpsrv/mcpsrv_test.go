@@ -35,7 +35,8 @@ func session(t *testing.T) (*mcp.ClientSession, *store.Store) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil)
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 	go func() {
-		if err := h.Server().Run(ctx, serverTransport); err != nil {
+		// An empty account is the owner, which is what a one-account file is.
+		if err := h.Server(store.Account{}).Run(ctx, serverTransport); err != nil {
 			t.Log("server stopped:", err)
 		}
 	}()
@@ -140,6 +141,48 @@ func TestAddThenListThenComplete(t *testing.T) {
 	rec := call(t, cs, "list_tasks", map[string]any{"filter": "recurring"})
 	if !strings.Contains(rec, "2026-08-26") {
 		t.Fatalf("the repeating task did not move to the next day: %s", rec)
+	}
+}
+
+// An agent that reads a task has to read the talk about it, and it has to be
+// able to leave what it found for the next reader.
+func TestACommentIsWrittenReadAndFound(t *testing.T) {
+	cs, _ := session(t)
+
+	out := call(t, cs, "add_tasks", map[string]any{"tasks": []map[string]any{
+		{"title": "Call the plumber"},
+	}})
+	var added struct {
+		IDs []string `json:"ids"`
+	}
+	mustJSON(t, out, &added)
+	if len(added.IDs) != 1 {
+		t.Fatalf("add_tasks returned %s", out)
+	}
+	taskID := added.IDs[0]
+
+	call(t, cs, "add_comment", map[string]any{"task_id": taskID, "body": "The leak is under the sink."})
+
+	read := call(t, cs, "comments", map[string]any{"task_id": taskID})
+	var got struct {
+		C []struct {
+			Wh   string `json:"wh"`
+			Body string `json:"body"`
+		} `json:"c"`
+		N int `json:"n"`
+	}
+	mustJSON(t, read, &got)
+	if got.N != 1 || got.C[0].Body != "The leak is under the sink." {
+		t.Fatalf("comments returned %s", read)
+	}
+	if got.C[0].Wh == "" {
+		t.Fatalf("a comment must name who wrote it: %s", read)
+	}
+
+	// The filter term finds the task by the text of its comment.
+	found := call(t, cs, "list_tasks", map[string]any{"filter": "comment: sink"})
+	if !strings.Contains(found, taskID) {
+		t.Fatalf("comment: sink did not find the task: %s", found)
 	}
 }
 

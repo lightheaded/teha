@@ -47,6 +47,7 @@ type TaskArgs struct {
 	StartDate    *string  `json:"start_date,omitempty"`
 	Deadline     *string  `json:"deadline,omitempty"`
 	DurationMin  *int     `json:"duration_min,omitempty"`
+	AssigneeID   *string  `json:"assignee_id,omitempty"`
 	SourceRef    *string  `json:"source_ref,omitempty"`
 	Labels       []string `json:"labels,omitempty"`
 	Clear        []string `json:"clear,omitempty"` // field names to set back to null
@@ -84,10 +85,49 @@ type LabelArgs struct {
 	Color *string `json:"color,omitempty"`
 }
 
+// CommentArgs carries the fields of a comment.
+//
+// CreatedAt is for the importer only. A Todoist comment has a posting time,
+// and an import that stamped every line with the import moment would lose the
+// order of a conversation. Nothing else sends it, and the store stamps the
+// line itself when it is absent.
+type CommentArgs struct {
+	ID        string  `json:"id"`
+	TaskID    *string `json:"task_id,omitempty"`
+	Body      *string `json:"body,omitempty"`
+	CreatedAt *string `json:"created_at,omitempty"`
+}
+
 // IDArgs addresses one row.
 type IDArgs struct {
 	ID string `json:"id"`
 }
+
+// Event is something that one person has to hear about, and that a write
+// produced. The store reports the fact and never the wording: the sender turns
+// it into a notification, because the sender owns the transport.
+//
+// A person is never told about their own action. Assigning a task to yourself
+// and answering your own comment are both silent.
+type Event struct {
+	// Kind is EventAssigned or EventCommented.
+	Kind string
+	// AccountID is who to tell. ActorID is who did it.
+	AccountID string
+	ActorID   string
+	// Actor is the name of the person who did it, for the wording.
+	Actor  string
+	TaskID string
+	Title  string
+	// Body is the text of a comment, and it is empty for an assignment.
+	Body string
+}
+
+// The kinds of Event.
+const (
+	EventAssigned  = "assigned"
+	EventCommented = "commented"
+)
 
 // Apply runs every command in one transaction and returns the new version.
 // A command whose uuid was seen before is skipped, so a retry is safe.
@@ -98,13 +138,42 @@ type IDArgs struct {
 // created the labels it named, then failed, and the account held a label that
 // nobody asked for. The version also moved for a command that nobody accepted.
 func (s *Store) Apply(cmds []Command) (int64, []Result, error) {
+	return s.ApplyAs(cmds, OwnerID)
+}
+
+// ApplyAs runs a batch as one account. A command that reaches a project the
+// account cannot see fails with one refusal, and the rest of the batch still
+// runs: a client sends twenty commands at once, and one bad id must not undo
+// the other nineteen.
+func (s *Store) ApplyAs(cmds []Command, accountID string) (int64, []Result, error) {
+	v, res, _, err := s.ApplyWithEvents(cmds, accountID)
+	return v, res, err
+}
+
+// ApplyWithEvents is ApplyAs, and it also reports what the other people in the
+// household have to hear about. The events are for the notification sender.
+//
+// They come back from the same call on purpose. A separate scan afterwards
+// would have to guess which rows this batch touched, and a batch that was
+// rolled back would still produce a notification.
+func (s *Store) ApplyWithEvents(cmds []Command, accountID string) (int64, []Result, []Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	act := ownerActor()
+	if accountID != "" && accountID != OwnerID {
+		a, err := s.AccountByID(accountID)
+		if err != nil {
+			return 0, nil, nil, err
+		}
+		act = actor{ID: a.ID, InboxID: a.InboxID}
+	}
+
 	results := make([]Result, 0, len(cmds))
+	var events []Event
 	tx, err := s.db.Begin()
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
 	defer tx.Rollback()
 
@@ -118,63 +187,83 @@ func (s *Store) Apply(cmds []Command) (int64, []Result, error) {
 		}
 		var seen int
 		if err := tx.QueryRow(`SELECT count(*) FROM applied_command WHERE uuid = ?`, c.UUID).Scan(&seen); err != nil {
-			return 0, nil, err
+			return 0, nil, nil, err
 		}
 		if seen > 0 {
 			results = append(results, Result{UUID: c.UUID, OK: true})
 			continue
 		}
 		if _, err := tx.Exec(`SAVEPOINT one_command`); err != nil {
-			return 0, nil, err
+			return 0, nil, nil, err
 		}
-		id, err := applyOne(tx, c, now, today)
+		id, err := applyOne(tx, c, now, today, act, &events)
 		if err != nil {
 			if _, rerr := tx.Exec(`ROLLBACK TO one_command`); rerr != nil {
-				return 0, nil, rerr
+				return 0, nil, nil, rerr
 			}
 			if _, rerr := tx.Exec(`RELEASE one_command`); rerr != nil {
-				return 0, nil, rerr
+				return 0, nil, nil, rerr
 			}
 			results = append(results, Result{UUID: c.UUID, Error: err.Error()})
 			continue
 		}
 		if _, err := tx.Exec(`RELEASE one_command`); err != nil {
-			return 0, nil, err
+			return 0, nil, nil, err
 		}
 		var v int64
 		if err := tx.QueryRow(`SELECT max(version) FROM change_log`).Scan(&v); err != nil {
-			return 0, nil, err
+			return 0, nil, nil, err
 		}
 		if _, err := tx.Exec(`INSERT INTO applied_command (uuid, at, version) VALUES (?,?,?)`, c.UUID, now, v); err != nil {
-			return 0, nil, err
+			return 0, nil, nil, err
 		}
 		results = append(results, Result{UUID: c.UUID, OK: true, ID: id})
 	}
 
 	var v sql.NullInt64
 	if err := tx.QueryRow(`SELECT max(version) FROM change_log`).Scan(&v); err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
-	return v.Int64, results, nil
+	return v.Int64, results, events, nil
 }
 
-func applyOne(tx *sql.Tx, c Command, now, today string) (string, error) {
+func applyOne(tx *sql.Tx, c Command, now, today string, act actor, events *[]Event) (string, error) {
+	// Every write passes the gate first. See reach.go.
+	if err := gate(tx, c, act); err != nil {
+		return "", err
+	}
 	switch c.Type {
 	case "task_add":
 		var a TaskArgs
 		if err := json.Unmarshal(c.Args, &a); err != nil {
 			return "", err
 		}
-		return taskAdd(tx, a, now)
+		id, err := taskAdd(tx, a, now, act)
+		if err == nil && a.AssigneeID != nil {
+			noteAssigned(tx, events, act, a.ID, *a.AssigneeID)
+		}
+		return id, err
 	case "task_update":
 		var a TaskArgs
 		if err := json.Unmarshal(c.Args, &a); err != nil {
 			return "", err
 		}
-		return a.ID, taskUpdate(tx, a, now)
+		// Read who had it BEFORE the write. A command that names the assignee
+		// it already has is a repeat, and a repeat must not push again.
+		before := ""
+		if a.AssigneeID != nil {
+			before = assigneeOf(tx, a.ID)
+		}
+		if err := taskUpdate(tx, a, now); err != nil {
+			return a.ID, err
+		}
+		if a.AssigneeID != nil && *a.AssigneeID != before {
+			noteAssigned(tx, events, act, a.ID, *a.AssigneeID)
+		}
+		return a.ID, nil
 	case "task_complete":
 		var a IDArgs
 		if err := json.Unmarshal(c.Args, &a); err != nil {
@@ -210,7 +299,7 @@ func applyOne(tx *sql.Tx, c Command, now, today string) (string, error) {
 		if err := json.Unmarshal(c.Args, &a); err != nil {
 			return "", err
 		}
-		return projectAdd(tx, a, now)
+		return projectAdd(tx, a, now, act)
 	case "project_update":
 		var a ProjectArgs
 		if err := json.Unmarshal(c.Args, &a); err != nil {
@@ -234,7 +323,7 @@ func applyOne(tx *sql.Tx, c Command, now, today string) (string, error) {
 		if err := json.Unmarshal(c.Args, &a); err != nil {
 			return "", err
 		}
-		return reminderAdd(tx, a, now)
+		return reminderAdd(tx, a, now, act)
 	case "reminder_update":
 		var a ReminderArgs
 		if err := json.Unmarshal(c.Args, &a); err != nil {
@@ -261,7 +350,7 @@ func applyOne(tx *sql.Tx, c Command, now, today string) (string, error) {
 		if err := json.Unmarshal(c.Args, &a); err != nil {
 			return "", err
 		}
-		return sectionAdd(tx, a, now)
+		return sectionAdd(tx, a, now, act)
 	case "section_update":
 		var a SectionArgs
 		if err := json.Unmarshal(c.Args, &a); err != nil {
@@ -298,6 +387,31 @@ func applyOne(tx *sql.Tx, c Command, now, today string) (string, error) {
 			return "", err
 		}
 		return a.ID, rowSet(tx, "section", a.ID, now, map[string]any{"deleted_at": nil})
+	case "comment_add":
+		var ca CommentArgs
+		if err := json.Unmarshal(c.Args, &ca); err != nil {
+			return "", err
+		}
+		id, err := commentAdd(tx, ca, now, act)
+		if err == nil {
+			noteCommented(tx, events, act, *ca.TaskID, strings.TrimSpace(*ca.Body))
+		}
+		return id, err
+	case "comment_update":
+		var ca CommentArgs
+		if err := json.Unmarshal(c.Args, &ca); err != nil {
+			return "", err
+		}
+		return ca.ID, commentUpdate(tx, ca, now)
+	case "comment_delete":
+		var a IDArgs
+		if err := json.Unmarshal(c.Args, &a); err != nil {
+			return "", err
+		}
+		if err := rowSet(tx, "comment", a.ID, now, map[string]any{"deleted_at": now}); err != nil {
+			return "", err
+		}
+		return a.ID, nil
 	case "label_add":
 		var a LabelArgs
 		if err := json.Unmarshal(c.Args, &a); err != nil {
@@ -328,14 +442,16 @@ func applyOne(tx *sql.Tx, c Command, now, today string) (string, error) {
 
 // --- tasks ------------------------------------------------------------------
 
-func taskAdd(tx *sql.Tx, a TaskArgs, now string) (string, error) {
+func taskAdd(tx *sql.Tx, a TaskArgs, now string, act actor) (string, error) {
 	if a.ID == "" {
 		return "", fmt.Errorf("task_add needs a client id")
 	}
 	if a.Title == nil || strings.TrimSpace(*a.Title) == "" {
 		return "", fmt.Errorf("task_add needs a title")
 	}
-	projectID := InboxID
+	// A capture with no project lands in the inbox of the person who wrote it.
+	// Each account has one, so the fixed id is only right for the owner.
+	projectID := act.InboxID
 	if a.ProjectID != nil && *a.ProjectID != "" {
 		projectID = *a.ProjectID
 	} else if a.Project != nil && *a.Project != "" {
@@ -366,11 +482,11 @@ func taskAdd(tx *sql.Tx, a TaskArgs, now string) (string, error) {
 	}
 	_, err = tx.Exec(`INSERT INTO task (id, project_id, section_id, parent_id, order_key, title, description,
 		priority, due_date, due_time, due_tz, rrule, rrule_from_completion, start_date, deadline,
-		duration_min, state, source_ref, created_at, updated_at, version)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open',?,?,?,?)`,
+		duration_min, assignee_id, state, source_ref, created_at, updated_at, version)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open',?,?,?,?)`,
 		a.ID, projectID, section, a.ParentID, order, strings.TrimSpace(*a.Title), str(a.Description),
 		prio, a.DueDate, a.DueTime, a.DueTz, a.RRule, boolInt(a.FromComplete), a.StartDate, a.Deadline,
-		a.DurationMin, a.SourceRef, now, now, v)
+		a.DurationMin, a.AssigneeID, a.SourceRef, now, now, v)
 	if err != nil {
 		return "", err
 	}
@@ -424,6 +540,17 @@ func taskUpdate(tx *sql.Tx, a TaskArgs, now string) error {
 	if a.SourceRef != nil {
 		set["source_ref"] = *a.SourceRef
 	}
+	if a.AssigneeID != nil {
+		// An empty value means nobody, and nobody is NULL. Two ways to say
+		// "unassigned" in one column is a column that every reader has to
+		// test twice. The clients send both: the browser clears the field and
+		// the phone sends an empty string.
+		if *a.AssigneeID == "" {
+			set["assignee_id"] = nil
+		} else {
+			set["assignee_id"] = *a.AssigneeID
+		}
+	}
 	if a.ProjectID != nil {
 		set["project_id"] = *a.ProjectID
 	} else if a.Project != nil {
@@ -435,7 +562,8 @@ func taskUpdate(tx *sql.Tx, a TaskArgs, now string) error {
 	}
 	for _, f := range a.Clear {
 		switch f {
-		case "due_date", "due_time", "due_tz", "rrule", "start_date", "deadline", "duration_min", "parent_id", "section_id":
+		case "due_date", "due_time", "due_tz", "rrule", "start_date", "deadline",
+			"duration_min", "parent_id", "section_id", "assignee_id":
 			set[f] = nil
 		default:
 			return fmt.Errorf("field %q cannot be cleared", f)
@@ -524,7 +652,7 @@ func touchTasksWithLabel(tx *sql.Tx, labelID, now string) error {
 
 // --- projects and labels ----------------------------------------------------
 
-func projectAdd(tx *sql.Tx, a ProjectArgs, now string) (string, error) {
+func projectAdd(tx *sql.Tx, a ProjectArgs, now string, act actor) (string, error) {
 	if a.ID == "" || a.Name == nil || strings.TrimSpace(*a.Name) == "" {
 		return "", fmt.Errorf("project_add needs an id and a name")
 	}
@@ -541,8 +669,8 @@ func projectAdd(tx *sql.Tx, a ProjectArgs, now string) (string, error) {
 		return "", err
 	}
 	_, err = tx.Exec(`INSERT INTO project (id, name, color, parent_id, order_key, is_inbox,
-		created_at, updated_at, version) VALUES (?,?,?,?,?,0,?,?,?)`,
-		a.ID, strings.TrimSpace(*a.Name), color, a.ParentID, order, now, now, v)
+		owner_id, created_at, updated_at, version) VALUES (?,?,?,?,?,0,?,?,?,?)`,
+		a.ID, strings.TrimSpace(*a.Name), color, a.ParentID, order, act.ID, now, now, v)
 	return a.ID, err
 }
 
@@ -667,11 +795,11 @@ func projectIDByName(tx *sql.Tx, name string) (string, error) {
 // project command does, so a client pulls a section the same way it pulls a
 // project.
 
-func sectionAdd(tx *sql.Tx, a SectionArgs, now string) (string, error) {
+func sectionAdd(tx *sql.Tx, a SectionArgs, now string, act actor) (string, error) {
 	if a.ID == "" || a.Name == nil || strings.TrimSpace(*a.Name) == "" {
 		return "", fmt.Errorf("section_add needs an id and a name")
 	}
-	project := InboxID
+	project := act.InboxID
 	if a.ProjectID != nil && *a.ProjectID != "" {
 		project = *a.ProjectID
 	}
@@ -836,6 +964,138 @@ func checkSection(tx *sql.Tx, sectionID, projectID string) error {
 		return fmt.Errorf("section %q is in another project", sectionID)
 	}
 	return nil
+}
+
+// --- who hears about it -----------------------------------------------------
+// A write tells the other people in the household. The store reports the fact
+// and the sender writes the words: see Event.
+
+// noteAssigned records that somebody now has a task. Giving yourself a task is
+// silent, and so is taking an assignee away.
+func noteAssigned(tx *sql.Tx, events *[]Event, act actor, taskID, assignee string) {
+	if events == nil || assignee == "" || assignee == act.ID {
+		return
+	}
+	*events = append(*events, Event{
+		Kind: EventAssigned, AccountID: assignee, ActorID: act.ID,
+		Actor: nameOf(tx, act.ID), TaskID: taskID, Title: titleOf(tx, taskID),
+	})
+}
+
+// noteCommented records that somebody said something. Everybody who can see
+// the task hears it, and the author does not hear their own line.
+func noteCommented(tx *sql.Tx, events *[]Event, act actor, taskID, body string) {
+	if events == nil || body == "" {
+		return
+	}
+	project := projectOfRow(tx, "task", taskID)
+	if project == "" {
+		return
+	}
+	title := titleOf(tx, taskID)
+	actorName := nameOf(tx, act.ID)
+	for _, who := range accountsWhoSee(tx, project) {
+		if who == act.ID {
+			continue
+		}
+		*events = append(*events, Event{
+			Kind: EventCommented, AccountID: who, ActorID: act.ID,
+			Actor: actorName, TaskID: taskID, Title: title, Body: body,
+		})
+	}
+}
+
+// accountsWhoSee lists the people a project reaches: the owner, and everybody
+// it is shared with.
+func accountsWhoSee(tx *sql.Tx, projectID string) []string {
+	rows, err := tx.Query(`SELECT owner_id FROM project WHERE id = ? AND owner_id IS NOT NULL
+		UNION SELECT account_id FROM project_member WHERE project_id = ?`, projectID, projectID)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for rows.Next() {
+		var who string
+		if err := rows.Scan(&who); err != nil {
+			rows.Close()
+			return out
+		}
+		out = append(out, who)
+	}
+	rows.Close() // the pool holds one connection, so free it before any write
+	return out
+}
+
+func titleOf(tx *sql.Tx, taskID string) string {
+	var title string
+	if err := tx.QueryRow(`SELECT title FROM task WHERE id = ?`, taskID).Scan(&title); err != nil {
+		return ""
+	}
+	return title
+}
+
+func assigneeOf(tx *sql.Tx, taskID string) string {
+	var who sql.NullString
+	if err := tx.QueryRow(`SELECT assignee_id FROM task WHERE id = ?`, taskID).Scan(&who); err != nil {
+		return ""
+	}
+	return who.String
+}
+
+// nameOf is the name a person reads, and never an account id.
+func nameOf(tx *sql.Tx, accountID string) string {
+	var name, display string
+	err := tx.QueryRow(`SELECT name, display_name FROM account WHERE id = ?`, accountID).
+		Scan(&name, &display)
+	if err != nil {
+		return ""
+	}
+	if display != "" {
+		return display
+	}
+	return name
+}
+
+// --- comments ---------------------------------------------------------------
+// A comment is a line of talk on one task. It joins the change log through
+// bump and rowSet, so a client pulls a comment exactly as it pulls a task.
+
+func commentAdd(tx *sql.Tx, a CommentArgs, now string, act actor) (string, error) {
+	if a.ID == "" {
+		return "", fmt.Errorf("comment_add needs a client id")
+	}
+	if a.TaskID == nil || *a.TaskID == "" {
+		return "", fmt.Errorf("comment_add needs a task_id")
+	}
+	if a.Body == nil || strings.TrimSpace(*a.Body) == "" {
+		return "", fmt.Errorf("comment_add needs a body")
+	}
+	var n int
+	if err := tx.QueryRow(`SELECT count(*) FROM task WHERE id = ?`, *a.TaskID).Scan(&n); err != nil {
+		return "", err
+	}
+	if n == 0 {
+		return "", fmt.Errorf("no task with id %q", *a.TaskID)
+	}
+	created := now
+	if a.CreatedAt != nil && *a.CreatedAt != "" {
+		created = *a.CreatedAt
+	}
+	v, err := bump(tx, "comment", a.ID, "insert", now)
+	if err != nil {
+		return "", err
+	}
+	_, err = tx.Exec(`INSERT INTO comment (id, task_id, account_id, body,
+		created_at, updated_at, version) VALUES (?,?,?,?,?,?,?)`,
+		a.ID, *a.TaskID, act.ID, strings.TrimSpace(*a.Body), created, now, v)
+	return a.ID, err
+}
+
+func commentUpdate(tx *sql.Tx, a CommentArgs, now string) error {
+	if a.Body == nil || strings.TrimSpace(*a.Body) == "" {
+		return fmt.Errorf("comment_update needs a body")
+	}
+	return rowSet(tx, "comment", a.ID, now, map[string]any{"body": strings.TrimSpace(*a.Body)})
 }
 
 // --- generic row helpers ----------------------------------------------------

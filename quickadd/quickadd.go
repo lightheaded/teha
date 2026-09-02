@@ -25,6 +25,10 @@ type Result struct {
 	Project  string
 	Labels   []string
 	RRule    string
+	// RemindAt is a clock time on the due day, "15:04". RemindBefore is a
+	// count of minutes before the due moment. A line sets one or neither.
+	RemindAt     string
+	RemindBefore int
 	// Parsed holds the pieces the parser took out of the line, in the order it
 	// took them. A client shows them to explain what it understood.
 	Parsed []string
@@ -38,18 +42,39 @@ var (
 	rePriority = regexp.MustCompile(`(?i)\s(?:p|!!)([1-4])\b`)
 	reProject  = regexp.MustCompile(`(?i)\s#([\w\-åäöõüšž]+)`)
 	reLabel    = regexp.MustCompile(`(?i)\s@([\w\-åäöõüšž]+)`)
-	reClock    = regexp.MustCompile(`\s(?:at\s+)?([01]?\d|2[0-3]):([0-5]\d)\b`)
-	reAtHour   = regexp.MustCompile(`(?i)\sat\s+([01]?\d|2[0-3])\s*(am|pm)?\b`)
-	reToday    = regexp.MustCompile(`(?i)\b(today|tod|tonight)\b`)
-	reTomorrow = regexp.MustCompile(`(?i)\b(tomorrow|tom|tmr)\b`)
-	reInDays   = regexp.MustCompile(`(?i)\bin\s+(\d+)\s*(day|days|week|weeks)\b`)
-	reNextWeek = regexp.MustCompile(`(?i)\bnext\s+week\b`)
-	reNextDay  = regexp.MustCompile(`(?i)\bnext\s+([a-z]{3,9})\b`)
-	reWeekday  = regexp.MustCompile(`(?i)\b(mon|tue|wed|thu|fri|sat|sun)(?:day|sday|nesday|rsday|urday)?\b`)
-	reDotted   = regexp.MustCompile(`\b(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?\b`)
-	reDayMonth = regexp.MustCompile(`(?i)\b(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b`)
-	reSpaces   = regexp.MustCompile(`\s+`)
+	// A reminder is read before the clock, or "remind me at 8" would set the
+	// due time and leave no reminder.
+	reRemindClock  = regexp.MustCompile(`(?i)\bremind(?:er)?(?:\s+me)?\s+(?:at\s+)?([01]?\d|2[0-3]):([0-5]\d)\b`)
+	reRemindHour   = regexp.MustCompile(`(?i)\bremind(?:er)?(?:\s+me)?\s+at\s+([01]?\d|2[0-3])\s*(am|pm)?\b`)
+	reRemindBefore = regexp.MustCompile(`(?i)\bremind(?:er)?(?:\s+me)?\s+(\d+)\s*(minutes|minute|mins|min|hours|hour|hrs|hr|days|day|m|h|d)\s+(?:before|early|ahead)\b`)
+	reClock        = regexp.MustCompile(`\s(?:at\s+)?([01]?\d|2[0-3]):([0-5]\d)\b`)
+	reAtHour       = regexp.MustCompile(`(?i)\sat\s+([01]?\d|2[0-3])\s*(am|pm)?\b`)
+	reToday        = regexp.MustCompile(`(?i)\b(today|tod|tonight)\b`)
+	reTomorrow     = regexp.MustCompile(`(?i)\b(tomorrow|tom|tmr)\b`)
+	reInDays       = regexp.MustCompile(`(?i)\bin\s+(\d+)\s*(day|days|week|weeks)\b`)
+	reNextWeek     = regexp.MustCompile(`(?i)\bnext\s+week\b`)
+	reNextDay      = regexp.MustCompile(`(?i)\bnext\s+([a-z]{3,9})\b`)
+	reWeekday      = regexp.MustCompile(`(?i)\b(mon|tue|wed|thu|fri|sat|sun)(?:day|sday|nesday|rsday|urday)?\b`)
+	reDotted       = regexp.MustCompile(`\b(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?\b`)
+	reDayMonth     = regexp.MustCompile(`(?i)\b(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b`)
+	reSpaces       = regexp.MustCompile(`\s+`)
+
+	// reProtect matches a span that no other pattern may read: a Markdown
+	// link, a code span, a quoted phrase and a bare URL. A URL carries dots
+	// and digits that look like a date, and a person who types quotes around
+	// a phrase means the words, not the date inside them. §6.4 of
+	// docs/PLAN.md states the quoting rule.
+	reProtect = regexp.MustCompile("(?i)" + `\[[^\]\n]*\]\([^)\s]*\)` + "|`[^`\n]+`" + `|"[^"\n]*"|(?:https?://|mailto:)\S+`)
 )
+
+// mask covers every protected span with a byte that no pattern matches. One
+// byte replaces one byte, so a match index in the masked line points at the
+// same place in the real line.
+func mask(s string) string {
+	return reProtect.ReplaceAllStringFunc(s, func(m string) string {
+		return strings.Repeat("\x01", len(m))
+	})
+}
 
 var (
 	weekdayNames  = []string{"sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"}
@@ -73,11 +98,14 @@ const isoDay = "2006-01-02"
 func Parse(text string, today time.Time) Result {
 	out := Result{}
 	rest := " " + text + " "
+	// masked holds the same bytes with every protected span blanked out. Every
+	// pattern matches against masked, and every string comes out of rest.
+	masked := mask(rest)
 
 	// eat removes the first match from the line and gives the groups to fn. A
 	// false from fn leaves the line alone, so the next pattern gets a try.
 	eat := func(re *regexp.Regexp, fn func(m []string) bool) bool {
-		loc := re.FindStringSubmatchIndex(rest)
+		loc := re.FindStringSubmatchIndex(masked)
 		if loc == nil {
 			return false
 		}
@@ -86,6 +114,7 @@ func Parse(text string, today time.Time) Result {
 		}
 		out.Parsed = append(out.Parsed, strings.TrimSpace(rest[loc[0]:loc[1]]))
 		rest = rest[:loc[0]] + " " + rest[loc[1]:]
+		masked = masked[:loc[0]] + " " + masked[loc[1]:]
 		return true
 	}
 
@@ -112,6 +141,22 @@ func Parse(text string, today time.Time) Result {
 		if out.Due == "" {
 			out.Due = nextWeekday(day, i, false)
 		}
+		return true
+	})
+
+	// "remind me at 8", "remind me at 7pm", "remind me 30m before".
+	_ = eat(reRemindClock, func(m []string) bool {
+		out.RemindAt = pad2(atoi(m[1])) + ":" + m[2]
+		return true
+	}) || eat(reRemindHour, func(m []string) bool {
+		h := atoi(m[1])
+		if strings.EqualFold(m[2], "pm") && h < 12 {
+			h += 12
+		}
+		out.RemindAt = pad2(h) + ":00"
+		return true
+	}) || eat(reRemindBefore, func(m []string) bool {
+		out.RemindBefore = atoi(m[1]) * unitMinutes(m[2])
 		return true
 	})
 
@@ -218,6 +263,18 @@ func groups(s string, loc []int) []string {
 		}
 	}
 	return out
+}
+
+// unitMinutes turns the unit of a reminder offset into minutes.
+func unitMinutes(unit string) int {
+	switch strings.ToLower(unit)[0] {
+	case 'h':
+		return 60
+	case 'd':
+		return 1440
+	default:
+		return 1
+	}
 }
 
 func weekdayIndex(word string) int {

@@ -19,7 +19,7 @@ build:
 
 test:
 	go test ./...
-	node --test internal/webui/assets/parse.test.mjs
+	node --test internal/webui/assets/*.test.mjs
 
 run:
 	go run ./cmd/teha -dev -addr $(ADDR) -db $(DB)

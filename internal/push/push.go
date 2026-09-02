@@ -152,13 +152,25 @@ func (s *Sender) Tick(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 
+	// A reminder goes to the devices of the person who set it, and to nobody
+	// else's. The subscriptions are read once per account and kept, because a
+	// batch usually carries several reminders of the same person.
+	byAccount := map[string][]store.PushSubscription{}
 	var sent int
 	for _, d := range claim.Due {
 		body, ok := s.payload(d, now)
 		if !ok {
 			continue // a digest with nothing in it says nothing
 		}
-		sent += s.fanOut(ctx, body, subs)
+		mine, seen := byAccount[d.AccountID]
+		if !seen {
+			mine, err = s.Store.SubscriptionsFor(now, d.AccountID)
+			if err != nil {
+				return sent, err
+			}
+			byAccount[d.AccountID] = mine
+		}
+		sent += s.fanOut(ctx, body, mine)
 	}
 	if s.Notify != nil {
 		s.Notify(claim.Version)
@@ -170,8 +182,14 @@ func (s *Sender) Tick(ctx context.Context) (int, error) {
 // area calls it, because the only convincing proof that push works is a
 // notification on the screen.
 func (s *Sender) SendTest(ctx context.Context) (int, error) {
+	return s.SendTestTo(ctx, "")
+}
+
+// SendTestTo pushes one notification to the devices of one account. An empty
+// account means every device in the file.
+func (s *Sender) SendTestTo(ctx context.Context, accountID string) (int, error) {
 	now := s.Now()
-	subs, err := s.Store.Subscriptions(now)
+	subs, err := s.Store.SubscriptionsFor(now, accountID)
 	if err != nil {
 		return 0, err
 	}
@@ -186,6 +204,92 @@ func (s *Sender) SendTest(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	return s.fanOut(ctx, body, subs), nil
+}
+
+// SendEvents tells people what somebody else did: a task given to them, or a
+// comment on a task they can see.
+//
+// This is not a reminder. A reminder is claimed in the database so that it
+// fires at most once (D-010), because it fires from a timer that can run
+// twice. An event has already happened once, inside one transaction, so there
+// is nothing to claim: this call sends and forgets.
+//
+// The events are grouped by person, so one account's devices are read once
+// even when a batch assigned five tasks at once.
+func (s *Sender) SendEvents(ctx context.Context, events []store.Event) (int, error) {
+	now := s.Now()
+	subs := map[string][]store.PushSubscription{}
+	var sent int
+	for _, ev := range events {
+		if ev.AccountID == "" {
+			continue
+		}
+		mine, seen := subs[ev.AccountID]
+		if !seen {
+			var err error
+			mine, err = s.Store.SubscriptionsFor(now, ev.AccountID)
+			if err != nil {
+				return sent, err
+			}
+			subs[ev.AccountID] = mine
+		}
+		if len(mine) == 0 {
+			continue
+		}
+		body, ok := s.eventPayload(ev)
+		if !ok {
+			continue
+		}
+		sent += s.fanOut(ctx, body, mine)
+	}
+	return sent, nil
+}
+
+// eventPayload writes the words for one event.
+//
+// The tag holds the task and the kind, so five comments on one task collapse
+// into one line in the tray and an assignment stays beside them.
+func (s *Sender) eventPayload(ev store.Event) ([]byte, bool) {
+	who := ev.Actor
+	if who == "" {
+		who = "Somebody"
+	}
+	title := ev.Title
+	if title == "" {
+		title = "a task"
+	}
+	n := notification{
+		Tag:    "teha-" + ev.Kind + "-" + ev.TaskID,
+		Kind:   ev.Kind,
+		TaskID: ev.TaskID,
+		URL:    "/?task=" + ev.TaskID,
+	}
+	switch ev.Kind {
+	case store.EventAssigned:
+		n.Title = title
+		n.Body = who + " gave this to you"
+	case store.EventCommented:
+		n.Title = title
+		n.Body = who + ": " + shorten(ev.Body, 120)
+	default:
+		return nil, false
+	}
+	body, err := json.Marshal(n)
+	if err != nil {
+		s.Log.Error("cannot write a notification", "err", err)
+		return nil, false
+	}
+	return body, true
+}
+
+// shorten cuts a long comment to one line of a notification. A tray shows two
+// lines at most, and the whole text is one tap away.
+func shorten(text string, max int) string {
+	text = strings.Join(strings.Fields(text), " ")
+	if len(text) <= max {
+		return text
+	}
+	return strings.TrimSpace(text[:max]) + "..."
 }
 
 // fanOut sends one message to every subscription, a few at a time.
@@ -351,7 +455,7 @@ func (s *Sender) payload(d store.DueReminder, now time.Time) ([]byte, bool) {
 	}
 	switch d.Kind {
 	case store.KindDailyDigest:
-		count, titles, err := s.Store.DigestSummary(now.Format("2006-01-02"), 3)
+		count, titles, err := s.Store.DigestSummaryFor(now.Format("2006-01-02"), 3, d.AccountID)
 		if err != nil {
 			s.Log.Error("cannot build the digest", "err", err)
 			return nil, false

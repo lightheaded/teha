@@ -16,7 +16,10 @@ import (
 // message. internal/push implements it.
 type Pusher interface {
 	PublicKey() string
-	SendTest(ctx context.Context) (int, error)
+	// SendTestTo pushes one notification to the devices of one account.
+	SendTestTo(ctx context.Context, accountID string) (int, error)
+	// SendEvents tells the other people in the household what a write did.
+	SendEvents(ctx context.Context, events []store.Event) (int, error)
 }
 
 // subscribeRequest is the shape a browser produces from
@@ -53,11 +56,18 @@ func (s *Server) handlePushSubscribe(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "cannot read the subscription: "+err.Error())
 		return
 	}
+	me, ok := s.mustCaller(w, r)
+	if !ok {
+		return
+	}
 	err := s.Store.SaveSubscription(store.PushSubscription{
 		Endpoint:  req.Endpoint,
 		P256dh:    req.Keys.P256dh,
 		Auth:      req.Keys.Auth,
 		UserAgent: shortUA(r.UserAgent()),
+		// The device belongs to the person who registered it, so a reminder
+		// of theirs reaches it and a reminder of the other person does not.
+		AccountID: me.ID,
 	})
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
@@ -90,7 +100,11 @@ func (s *Server) handlePushTest(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "this server has no VAPID key, so it cannot send push")
 		return
 	}
-	n, err := s.Push.SendTest(r.Context())
+	me, ok := s.mustCaller(w, r)
+	if !ok {
+		return
+	}
+	n, err := s.Push.SendTestTo(r.Context(), me.ID)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
