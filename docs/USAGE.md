@@ -68,7 +68,7 @@ Open <http://127.0.0.1:8637>.
 |---|---|---|---|
 | `-addr` | `TEHA_ADDR` | `127.0.0.1:8637` | The listen address. |
 | `-db` | `TEHA_DB` | `teha.db` | The path to the SQLite file. |
-| `-token` | `TEHA_TOKEN` | empty | The device token. |
+| `-token` | `TEHA_TOKEN` | empty | The device token of the owner. Every invited person gets one of their own. |
 | `-rp-id` | `TEHA_RP_ID` | empty | The WebAuthn relying-party id, a bare domain such as `teha.example`. Empty reads it from the request host. |
 | `-origin` | `TEHA_ORIGIN` | empty | The origin the web app is served from, such as `https://teha.example`. Empty builds it from the request host. |
 | `-trust-forwarded` | `TEHA_TRUST_FORWARDED` | off | Read the client address from `X-Forwarded-For`. Turn it on only behind a proxy that writes that header. |
@@ -80,6 +80,7 @@ Open <http://127.0.0.1:8637>.
 | — | `TEHA_VAPID_PRIVATE_KEY` | empty | The Web Push private key. A secret, so it has no flag. |
 | `-vapid-subject` | `TEHA_VAPID_SUBJECT` | a repository URL | A `mailto:` address or an `https:` URL for the push service. |
 | `-push-interval` | — | `30s` | How often the reminder scheduler looks for due reminders. |
+| `-checkpoint-interval` | — | `10s` | How often the write-ahead log is written into the database file. A backup replicates the file, so this bounds what a restore can lose. `0` turns it off, and [DEPLOY.md](DEPLOY.md) says not to. |
 
 The flag wins over the environment variable.
 
@@ -99,7 +100,11 @@ when it is `add`, `ls`, `done`, `today`, `projects` or `import`.
 ### The device token
 
 One token guards `/v1/*`, `/mcp`, `/login` and the web app. `/v1/health` needs
-no token.
+no token, and `/v1/join` takes an invitation code instead.
+
+`TEHA_TOKEN` is the **owner's** token. Everybody the owner invites gets a token
+of their own, which the join answer shows once, and a request is answered for
+whichever account its token names.
 
 If `-token` and `TEHA_TOKEN` are both empty, and `-dev` is off, the server makes
 a new random token at each start. It prints the token to stderr:
@@ -192,7 +197,7 @@ memory. A passkey login is one tap, so a restart costs one tap.
 
 | Route | Method | Function |
 |---|---|---|
-| `/v1/sync` | POST | `{since, commands[]}` in, changed rows out. At most 200 commands per request, at most 4 MB. |
+| `/v1/sync` | POST | `{since, commands[]}` in, changed rows out, for the account the token or the session names. At most 200 commands per request, at most 4 MB. The rows are `projects`, `sections`, `labels`, `tasks`, `reminders` and `comments`. The answer also carries `me`, `inbox` and, after a share was taken back, `reset`. |
 | `/v1/tasks` | GET | `?filter=`, `?limit=`, `?offset=`. At most 500 rows. |
 | `/v1/projects` | GET | Every project. |
 | `/v1/sections` | GET | Every section, in the order of its project. |
@@ -211,6 +216,12 @@ memory. A passkey login is one tap, so a restart costs one tap.
 | `/v1/passkeys` | GET | Every passkey, without its public key. |
 | `/v1/passkeys/{id}` | DELETE | Remove one passkey. |
 | `/v1/logout` | POST | Clear the session cookie and the token cookie. |
+| `/v1/household` | GET | Who is in the house, which lists are shared, and the id of your own inbox. |
+| `/v1/invites` | POST | Write an invitation. The answer carries the code, once. The owner only. |
+| `/v1/invites` | GET | Every invitation, with no code. The owner only. |
+| `/v1/invites/revoke` | POST | `{"id":"..."}`. Removes an invitation nobody used. The owner only. |
+| `/v1/join` | POST | `{"code":"...","name":"..."}`. Makes an account and answers with its device token. No token. |
+| `/v1/share` | POST | `{"project_id":"...","account_id":"...","share":true}`. The owner of that list only. |
 | `/mcp` | POST | The MCP endpoint. |
 | `/login` | GET, POST | The passkey button and the token form. |
 | `/` | GET | The web app. |
@@ -241,13 +252,16 @@ Read [Passkeys](#passkeys) for the enrolment and the rules the server applies.
 
 | Part | What it does |
 |---|---|
-| Sidebar | Six built-in views, then one entry per project. Each entry shows a count. The sidebar appears at a window width of 800 px or more. |
-| Header | The view name, the number of tasks, and the status. |
+| Sidebar | Six built-in views, then one entry per project. Each entry shows a count. A shared list carries a dot and a `⋯` button. The sidebar appears at a window width of 800 px or more. |
+| Header | The view name, the number of tasks, the layout buttons, the filter box and the status. |
 | Status | `v18` after a good sync. `3 to send` while the outbox holds commands. `offline · 3 queued` after a failed sync. |
 | Quick add box | One line makes one task. Press Enter. |
 | Hint line | What the parser found, as you type. |
 | Task list | Groups in this order: Overdue, Today, Tomorrow, then one group per date, then No date. |
 | Board button | In a project view only. It swaps the list for a board of columns, and back. |
+| Shop button | In a project view only. It swaps the list for shopping mode, and back. |
+| Calendar button | In every view. It swaps the list for a month or a week, and back. |
+| Filter box | Any query the grammar knows. `/` focuses it, Enter runs it. |
 | The circle | Click it to complete the task. |
 | The rest of the row | Click it to open the detail sheet. |
 | Overdue section head | A **Reschedule** button. It moves every overdue task in the view. |
@@ -266,7 +280,72 @@ The built-in views are filter queries:
 | No date | `no date` |
 | Priority 1 | `p1` |
 
-A project entry in the sidebar runs `#<project name>`.
+A project entry in the sidebar runs `#<project name>`. A seventh view,
+**Assigned to me**, appears once a second person is in the household.
+
+### The calendar layout
+
+The **Calendar** button, and the `c` key, swap the list for a calendar of the
+same view. **Month** and **Week** are the two shapes.
+
+- Drag a task to another day to move it. One Undo puts it back.
+- Below the grid is a strip of every task in the view that has no day. Drag one
+  onto a day to schedule it, or drag a task onto the strip to take its date off.
+- `[` and `]` step to the period before and after. **Today** comes back.
+- A task due outside the window is counted in the header, never hidden without
+  a word.
+
+A reminder follows its task. Every path that writes a due date re-arms it, the
+calendar drag included.
+
+### Markdown in a note
+
+The note field of a task reads as Markdown and edits as plain text. Click it to
+edit, press Escape or `⌘`/`Ctrl`+`Enter` to leave it. It reads headings, a
+fenced code block, a blockquote, a bullet list, a numbered list, a task list, a
+rule, `**bold**`, `*italic*`, `` `code` ``, `~~strike~~`, `[text](url)` and a
+bare URL. A task title reads the inline part of that list, so a link in a title
+works and opens.
+
+Two rules keep a note safe. The text is escaped before anything else, so no
+markup in a note reaches the page. A link target must carry a scheme the app
+trusts, so a `javascript:` target stays plain text. An image is drawn as a
+link, because the content security policy allows no remote picture.
+
+**Paste a link over selected text and it becomes a link.** Select the words,
+paste the URL, and the field holds `[the words](the url)`. It works in the note
+and in the title field of the detail sheet. A URL pasted over nothing, or over
+a URL, is an ordinary paste.
+
+### The household
+
+The **Settings** panel lists everybody in the house and invites the next one.
+
+1. Type a name and press **Invite**. The server answers with a code, once. Copy
+   it and send it.
+2. The other person opens the app, sees the sign-in page, types their name and
+   the code, and presses **Join**. They get an account of their own, with their
+   own inbox and their own device token. On the phone the same two fields are in
+   **Settings**, under **The household**, and the app fills in its own token.
+3. Share a list with them from the `⋯` button beside it in the sidebar. A tick
+   means it is shared. Press it again to take it back.
+
+What each person sees is what they own and what somebody shared with them. An
+inbox is never shared. A reminder belongs to the person who set it, even on a
+shared task.
+
+In a shared list, the detail sheet grows a **Who** field. `assigned to: me`,
+`assigned to: <name>`, `assigned` and `unassigned` are filter terms, and
+**Assigned to me** is a view in the sidebar.
+
+Only the owner of a list may rename it, delete it or share it. A member adds
+tasks, edits them, ticks them off and assigns them.
+
+An invitation is good for seven days and for one person. **Revoke** takes back
+one that nobody used.
+
+A task given to somebody, and a comment on a task they can see, reach them as a
+notification. Nobody hears their own action.
 
 ### The board layout
 
@@ -295,6 +374,40 @@ section in one command, so the pair can never disagree.
 
 The list order is the due date, then the priority, then the title. A task with
 no date goes last.
+
+### Shopping mode
+
+A project view has a third layout. The **Shop** button in the header, and the
+`S` key, draw the list the way a shop needs it: big targets, one heading per
+aisle, and the field to add an item at the top.
+
+An aisle is a section of the project, so the headings are the same ones the
+board draws as columns. Make them once, on the board or in the detail sheet.
+
+| What it does | How |
+|---|---|
+| Add an item | Type in the top field and press Enter. The field keeps the caret, so three items are three lines. |
+| Put an item in the basket | Tap the circle. |
+| Take it back | Tap the circle again, or press `u`. |
+| Empty the basket | **Clear** in the basket heading. |
+| Add something you buy often | Tap it under **Bought before**. |
+| A count | Write `2x milk`. The count draws as a chip. |
+| Move an item to another aisle | Open it and use **Section**. |
+
+**The aisle is learned.** A new item goes into the aisle of the newest item of
+the same name, so `milk` lands in Dairy from the second time on. An item nobody
+has bought before goes under **Anything else**. Moving one teaches the next.
+
+**Bought before** lists what the list has held and does not hold now, newest
+first, one row per name.
+
+**The basket** holds what went in on this trip: the last twelve hours, and
+whatever **Clear** has not removed. A tick is on the server at once, so the
+other person in the shop sees it on their own screen.
+
+The layout holds at half a phone width, because the shop's own app is often
+open beside it. The screenshot job fails the build if it scrolls sideways or if
+a check target shrinks below a thumb at 320 pixels.
 
 ### Move every overdue task in one gesture
 
@@ -353,16 +466,30 @@ and an action on a row the user cannot see is a change nobody can check.
 ### The detail sheet
 
 The sheet holds every field of one task: title, notes, due date, time, start
-date, deadline, priority, project, labels and the repeat rule. The labels field
-takes a comma separated list, for example `store, call`. The repeat field takes
-a raw RRULE string, for example `FREQ=WEEKLY;BYDAY=MO`.
+date, deadline, priority, project, section, labels and the repeat rule. The
+labels field takes a comma separated list, for example `store, call`. The repeat
+field takes a raw RRULE string, for example `FREQ=WEEKLY;BYDAY=MO`.
+
+**Section** appears when the project has one. It is the same heading the board
+draws as a column, and it is the aisle of shopping mode, so a phone or a
+one-handed hand can file a task without dragging it.
 
 **Remind** arms one notification for the task: at the due time, or 10 minutes,
 30 minutes, an hour or a day before it. The row needs a due date, and a task
 with a date but no time counts as 09:00. A change of the due date or the due
 time moves the reminder with it.
 
-To add a sub-task, type a title in the last field and press Enter.
+To add a sub-task, type a title in the field under **Sub-tasks** and press
+Enter.
+
+**Comments** is the talk about the task. Type a line and press Enter. A comment
+reads as Markdown, it carries who said it and how long ago, and everybody who
+can see the task can read it and add to it. Your own line has a small cross to
+remove it, and a click on it opens it for editing. Nobody edits or removes
+somebody else's line, here or on the server.
+
+A comment reaches the other person as a notification, and so does a task you
+give them. Nothing is sent for your own action.
 
 **Delete** removes the task. **Escape** closes the sheet. Each field saves when
 it loses focus. The sheet never waits for the server.
@@ -382,6 +509,9 @@ it loses focus. The sheet never waits for the server.
 | `s` | Pick the selected task for a bulk action. |
 | `Shift+A` | Pick every task in the view. |
 | `b` | Swap the list and the board, in a project view. |
+| `c` | Swap the list and the calendar, in any view. |
+| `/` | Move the cursor into the filter box. |
+| `[`, `]` | On the calendar: the period before and after. |
 | `h`, `l`, arrow left, arrow right | On the board: move to the column on the left or the right. |
 | `Shift+H`, `Shift+L` | On the board: carry this task one column left or right. |
 | `Shift+J`, `Shift+K` | On the board: move this task down or up inside its column. |
@@ -400,13 +530,23 @@ it loses focus. The sheet never waits for the server.
 
 ### Offline
 
-The browser holds the account in `localStorage`. Every edit lands in the local
-state and in an outbox. The screen updates first. The outbox drains to
-`POST /v1/sync` when the network allows it. A retry runs every two seconds
-while the outbox holds commands. A command carries a uuid, so a retry is safe.
+The browser holds the account in IndexedDB: one object store per table, keyed
+by the row id, plus one small record for the sync watermark, the outbox and how
+this browser is arranged. A write marks one row and a timer writes the batch, so
+nothing on the screen waits for the disk. A browser that refuses IndexedDB, which
+is what a private window does, falls back to one `localStorage` string.
 
-The service worker caches `/`, `/app.js`, `/parse.js`,
-`/manifest.webmanifest` and `/icon.svg`. It never caches `/v1/` or `/mcp`.
+A browser that used an older build moves to the new database once, at the next
+start. Nothing is lost, the outbox included, and the old key is removed.
+
+Every edit lands in the local state and in an outbox. The screen updates first.
+The outbox drains to `POST /v1/sync` when the network allows it. A retry runs
+every two seconds while the outbox holds commands. A command carries a uuid, so
+a retry is safe.
+
+The service worker caches `/`, `/app.js`, `/parse.js`, `/passkey.js`, `/md.js`,
+`/filter.js`, `/db.js`, `/manifest.webmanifest` and `/icon.svg`. It never caches
+`/v1/` or `/mcp`.
 
 | With the server down | State |
 |---|---|
@@ -416,7 +556,8 @@ The service worker caches `/`, `/app.js`, `/parse.js`,
 | Reschedule the whole overdue section, and undo it | Works |
 | Every bulk action on a picked set, and undo it | Works |
 | Every field in the detail sheet | Works |
-| The six built-in views, and a project view | Works |
+| The six built-in views, a project view, the board and shopping mode | Works |
+| Reading and writing a comment | Works |
 | The first load in a new browser | Needs the server one time |
 | The login | Needs the server |
 | An unusual filter term | See the next table |
@@ -460,23 +601,36 @@ Two rules are worth knowing:
 
 [DECISIONS.md](DECISIONS.md) D-010 and D-011 hold the reasons.
 
-### The browser filter is a subset
+### The browser reads the whole grammar
 
-This is about the browser alone. The phone calls the shared Go compiler through
-the gomobile binding, so it reads every term the server reads, except
-`created:`.
+This used to be a list of what the browser could not do. It is not one any
+more.
 
-The browser evaluates the filter over the local rows in its own JavaScript. It
-knows fewer terms than the server. A term that it does not know becomes a title
-search, so a view quietly shows the wrong rows.
+The browser evaluates the filter over its local rows in its own JavaScript, and
+it reads every term the server reads, with one exception: the sync payload
+carries no creation date, so `created:` fails there with a sentence. The phone
+calls the shared Go compiler through the gomobile binding and reads every term
+except `created:`, `/Section`, `no section` and the assignee terms, because the
+Room database keeps no such columns. A term a client cannot answer says so. It
+never quietly answers with the wrong rows.
 
-| The browser knows | The browser does not know |
-|---|---|
-| `today`, `tod`, `tomorrow`, `overdue`, `od`, `week`, `next 7 days`, `no date`, `no section`, `recurring`, `subtask`, `done`, `completed`, `no priority`, `p1` to `p4`, `#Project`, `#inbox`, `/Section`, `%label`, `@label`, `search: text`, a bare word, and the operators `&`, `|`, `,`, `!` | `##Project`, `#Project*`, `/Section*`, `%label*`, `no label`, `before:`, `after:`, `date:`, `deadline`, `deadline:`, `created:`, `yesterday`, `no time`, `has time`, `top level`, `no parent`, `started`, `deferred`, `wont do`, parentheses |
+`parser-fixtures/filter.json` is what holds them together: one small account,
+eighty-one queries, and one answer each. The Go test writes the answers by
+running the compiled SQL against real SQLite, and the browser test demands the
+same ones. See [DECISIONS.md](DECISIONS.md) D-018.
 
-One more difference: in the browser `#Trip` finds `Trip to Setomaa` by prefix.
-On the server `#Trip` needs the exact project name. Read
-[section 4](#4-filters) for the rule.
+One difference is worth knowing, because it changed. `#Trip` is now an **exact**
+project name in the browser, as it always was on the server. Use `#Trip*` for
+the prefix. Quick add still resolves `#Trip` to `Trip to Setomaa` by a unique
+prefix, which is a different question asked at a different moment.
+
+### The filter field
+
+The header carries a filter box. Press `/` to focus it, type any query, and
+press `Enter`. Escape puts the box back to the query of the current view.
+
+A query the store cannot answer replaces the list with the sentence that says
+why, so an unreadable filter is never an empty list with no reason.
 
 ---
 
@@ -585,6 +739,45 @@ The rule is the same everywhere: a typo must never make a new project.
 `#Trip` finds `Trip to Setomaa`, because one project starts with `Trip`. The
 match ignores upper and lower case.
 
+### A reminder
+
+| You type | What it sets |
+|---|---|
+| `remind me at 8` | A reminder at 08:00 on the due day. |
+| `remind me at 7pm` | A reminder at 19:00. |
+| `remind me at 9:15` | A reminder at 09:15. |
+| `remind me 30 minutes before` | Thirty minutes before the due moment. |
+| `remind me 2 hours before` | Two hours before it. |
+| `remind me 1 day before` | A day before it. |
+
+`reminder` works in place of `remind me`, and `early` and `ahead` work in place
+of `before`.
+
+A reminder needs a moment to hang from. A task with a day and no time counts as
+09:00, which is the same rule the detail sheet follows. A line that names a
+clock time and no day means the next time that hour comes: today while it is
+ahead, and tomorrow once it has passed.
+
+```
+Call the bank tomorrow remind me at 8
+Leave for the airport friday at 6:30 remind me 45 minutes before
+```
+
+The phone parses the words and cannot arm the reminder yet, because the Android
+database holds no reminder row.
+
+### What the parser leaves alone
+
+Four kinds of span are protected, and no date, priority, project or label
+pattern reads inside them:
+
+| Span | Example |
+|---|---|
+| A quoted phrase | `Read "tomorrow never dies"` keeps the words and takes no date. |
+| A URL | `Check https://example.org/v1.2/notes tomorrow` keeps the `1.2`. |
+| A code span | ``Fix `every day` in the docs`` sets no recurrence. |
+| A Markdown link | `Read [the plan for tomorrow](https://example.org/p) friday` is due on Friday and keeps its link. |
+
 ### A known limit
 
 The parser takes a priority token from inside a sentence:
@@ -602,11 +795,22 @@ The corpus records this case. Put such a word in the description instead.
 One filter language runs in the app, on the phone, in `/v1/tasks`, in `teha ls`
 and in the MCP tools. The server compiles a query to a SQL `WHERE` clause.
 
-The phone runs the same compiler over its own database, so every term below
-means the same thing there. One term is the exception: the phone refuses
-`created:`, because the local database keeps no creation date, and it says so
-rather than answer with the wrong rows. The browser is the one client that reads
-a subset. See [the table in section 2](#the-browser-filter-is-a-subset).
+The phone runs the same compiler over its own database, and the browser reads
+the same grammar over its local rows, so every term below means the same thing
+in all three places. `parser-fixtures/filter.json` is the contract that proves
+it: one account, eighty-one queries, one answer each, checked against real
+SQLite and against the browser.
+
+Four terms are exceptions, and each one says so rather than answer with the
+wrong rows:
+
+| Term | Where it fails | Why |
+|---|---|---|
+| `created:` | The phone and the browser | Neither keeps a creation date. |
+| `/Section`, `no section` | The phone | Room holds no section table. |
+| `assigned`, `assigned to:` | The phone | Room holds no assignee and no account table. |
+
+See [the browser section](#the-browser-reads-the-whole-grammar).
 
 ### The grammar
 
@@ -678,7 +882,16 @@ or a weekday name. A weekday name means its next occurrence, never today.
 | `%lab*`, `@lab*` | Tasks with a label that starts with `lab`. |
 | `no label`, `no labels` | Tasks with no label. |
 | `search: text` | The text in the title or the description. |
+| `comment: text`, `note: text` | The text of a comment on the task. |
 | a bare word | The same title and description search. |
+| `assigned to: me` | Tasks that are yours to do. |
+| `assigned to: <name>` | Tasks that are the named person's to do. |
+| `assigned to: nobody` | Tasks in a shared list that nobody picked up. |
+| `assigned`, `unassigned` | With and without a person on them. |
+
+`search:` and `comment:` read two different things. The full-text index is
+written when a task changes, so it holds the title and the description and no
+comment text. A comment search reads the comment table.
 
 Both `%label` and `@label` work. Todoist moved filters from `@label` to
 `%label`, and retires `@` through 2026. teha accepts both marks, so an imported
@@ -982,7 +1195,7 @@ same server. Keep the real token out of the file:
 
 With `-dev`, the server needs no header at all.
 
-### The eight tools
+### The ten tools
 
 | Tool | Arguments | Answer |
 |---|---|---|
@@ -992,11 +1205,18 @@ With `-dev`, the server needs no header at all.
 | `complete_tasks` | `ids[]`, `wont_do` | The same write shape |
 | `list_projects` | none | `{"projects":[{"id":"p_home","name":"Home","open":3,"sec":[{"id":"x_plan","n":"Plan"}]}]}` |
 | `add_project` | `name`, `color` | The same write shape |
+| `comments` | `task_id` | `{"task":"t1","c":[{"id":"cm1","wh":"Partner","at":"...","body":"..."}],"n":1}` |
+| `add_comment` | `task_id`, `body` | The same write shape |
 | `search` | `text`, `limit` (default 50) | `{"t":[...],"n":1}` |
 | `plan_day` | none | Overdue, due today, and the undated pile by project |
 
-`clear[]` accepts seven field names: `due_date`, `due_time`, `rrule`,
-`start_date`, `deadline`, `parent_id` and `section_id`. Any other name fails.
+`clear[]` accepts ten field names: `due_date`, `due_time`, `due_tz`, `rrule`,
+`start_date`, `deadline`, `duration_min`, `parent_id`, `section_id` and
+`assignee_id`. Any other name fails.
+
+`search` reads the full-text index, which holds titles and descriptions. To
+find a task by what somebody said about it, use the filter term `comment:` in
+`list_tasks`.
 
 `repeat` takes an RRULE string, for example `FREQ=WEEKLY;BYDAY=MO`. The server
 validates the rule before it writes.
@@ -1095,7 +1315,7 @@ documented Todoist limits, and it writes in batches of 100 commands.
 | A completed task | The task, then a completion command |
 | A section | A section row in the same project |
 | A task in a section | `section_id` |
-| A task comment | The end of the description |
+| A task comment | A comment row on the task, with the original posting time |
 | The child order | `order_key` |
 
 The importer converts 33 recurrence forms, among them `every other week`,
@@ -1111,6 +1331,7 @@ The importer converts 33 recurrence forms, among them `every other week`,
 | A project comment | Skipped and counted |
 | A section in an archived project | Skipped and counted. Its tasks reach the inbox with no section. |
 | The folded text of an earlier import | It stays. Read the paragraph below. |
+| A comment on a task an earlier run wrote | Skipped. The task matches by `source_ref`, so the run keeps the row it has, and the comment is already in that row's description. |
 | A repeat rule that does not convert, such as `every 3 hours` or `every 4th thursday of november` | The task still arrives. The original words go into the description. |
 | A time inside a repeat rule, such as `every day at 10:00` | The rule becomes `FREQ=DAILY`. The time survives in the due time. |
 | Filters, reminders, attachments, assignees and karma | Not read at all |
@@ -1133,17 +1354,18 @@ Commands: 0, failed: 0.
 
 Run `--dry-run` first, read the summary, then run the real import.
 
-### A section name that an earlier import folded
+### Text that an earlier import folded into a description
 
 Before the section table existed, the importer wrote the section name as the
-first line of the description, as `Section: Errands`. **A re-import does not
-clean that line.** The task matches by `source_ref`, so the importer keeps the
-row it already has and writes nothing.
+first line of the description, as `Section: Errands`. Before the comment table
+existed it wrote every comment there too, under a `Comments:` heading. **A
+re-import does not clean either.** The task matches by `source_ref`, so the
+importer keeps the row it already has and writes nothing.
 
 There is no migration for it, and there will not be one: a migration would have
-to guess which lines of a description are a folded section name and which are a
-note that a person wrote. Edit the description of those tasks, or delete the
-account file and import again from Todoist.
+to guess which lines of a description are folded text and which are a note that
+a person wrote. Edit the description of those tasks, or delete the account file
+and import again from Todoist.
 
 ---
 
@@ -1163,39 +1385,49 @@ and [android/README.md](../android/README.md) holds the install steps and the
 list of open defects. The phone app captures with the Quick Settings tile, edits
 every field of a task, acts on a picked set of tasks, and reaches the six views
 of the browser, one view per project and any filter you type. It has no
-notification and no background sync. A phone that subscribes in its browser
-receives the server's push in the meantime.
+notification and no background sync.
 
-**One person only.** You cannot share a project. There is no second account,
-no assignee, no comment and no attachment. A reminder reaches a browser and an
-installed web app. A comment or an assignment sends nothing, because there is
-nobody else to send to.
+**The phone is in the household since 2026-09-02.** Settings takes an
+invitation code and the phone becomes a second account with its own inbox and
+its own device token. A task carries an assignee and a section, "Assigned to
+me" appears in the drawer once two people share a list, and the app acts on the
+`reset` field, so a phone whose shared list was taken back drops its copy. The
+phone still has no comments and no shopping layout.
 
-**One token, no passkeys.** One device token guards everything. The browser
-keeps it in a cookie. A leaked token needs a new `TEHA_TOKEN` and a restart,
-and then every client logs in again.
+**No attachment.** A comment is a row of its own, with an author, and the
+`comment:` term reads it. A file has nowhere to go: no part of this build stores
+one.
 
-**No calendar layout.** Sections and the board layout ship. A calendar with a
-month and a week view, and a drag to reschedule, does not.
+**The full-text index holds no comment text.** `search:` reads the title and the
+description, and `comment:` reads the comment table. The two terms therefore
+mean two different things, and a comment search is a LIKE rather than an index.
 
-**The browser stores its state in `localStorage`,** not in OPFS with SQLite.
-That is enough for thousands of tasks. It needs a replacement before it holds a
-decade of history.
+**Shopping mode is in the browser and not on the phone.** The phone holds the
+list, the sections and the assignee, and it draws them as a list.
 
-**The backup restore is untested.** Litestream replicates the cluster database
-to object storage and reports a matching transaction id. Nobody has rehearsed a
-restore from those files yet.
+**The calendar has no hour grid.** The week view is seven day columns, so a
+task with a time sorts to the top of its day rather than sitting at its hour.
+
+**The browser holds no query engine.** The rows are in IndexedDB and the filter
+grammar is evaluated over them in JavaScript, held to the server by a shared
+corpus. A query that the server answers with an index is a walk over the rows
+here.
+
+**The restore is rehearsed on a laptop, not against the real bucket.**
+`scripts/restore-drill.sh` runs the whole path against its own MinIO in Docker
+and it passes. Nobody has restored from the bucket the deployment writes to,
+which is the run that also proves the credentials.
 
 **Start date, deadline and duration have columns but little UI.** The detail
 sheet edits the start date and the deadline. The filter language reads them.
 Nothing else uses them.
 
-**The browser filter is a subset of the server filter.** Read
-[section 2](#the-browser-filter-is-a-subset).
+**`created:` fails in the browser,** because the sync payload carries no
+creation date. Every other term of the grammar answers the same everywhere.
 
-Next, in order: rehearse a restore from the Litestream replica, then add a
-second account so that two people can share a project. [BACKLOG.md](BACKLOG.md)
-holds every knowingly unfinished thing with its reason.
+Next, in order: an hour grid on the week calendar, attachments, the activity
+log, and shopping mode on the phone. [BACKLOG.md](BACKLOG.md) holds every
+knowingly unfinished thing with its reason.
 
 The real Todoist import already ran, on 2026-08-25: 17 projects, 250 tasks, 63
 labels, 0 failed commands, one HTTP request, 34 milliseconds. It also found

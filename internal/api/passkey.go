@@ -89,13 +89,6 @@ type RelyingParty struct {
 }
 
 // webSession is one signed-in browser.
-type webSession struct {
-	// hash holds sha256 of the cookie value. The value itself is never stored,
-	// so a copy of this map is not a set of usable cookies.
-	hash    string
-	expires time.Time
-}
-
 // ceremony is one in-flight WebAuthn exchange.
 type ceremony struct {
 	hash    string
@@ -512,9 +505,9 @@ func (s *Server) handlePasskeyDelete(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(sessionCookieName); err == nil {
-		s.sessMu.Lock()
-		delete(s.sessions, cookieKey(c.Value))
-		s.sessMu.Unlock()
+		if err := s.Store.DeleteSession(c.Value); err != nil {
+			s.Log.Error("cannot close the session", "err", err)
+		}
 	}
 	clearCookie(w, r, sessionCookieName)
 	clearCookie(w, r, ceremonyCookieName)
@@ -532,40 +525,35 @@ func (s *Server) sessionTTL() time.Duration {
 	return DefaultSessionTTL
 }
 
+// issueSession opens a session for the owner. A passkey login that knows which
+// account it signed in calls issueSessionFor instead.
 func (s *Server) issueSession(w http.ResponseWriter, r *http.Request) {
-	value := randomToken()
-	expires := s.Now().Add(s.sessionTTL())
-	s.sessMu.Lock()
-	if s.sessions == nil {
-		s.sessions = map[string]webSession{}
-	}
-	key := cookieKey(value)
-	s.sessions[key] = webSession{hash: key, expires: expires}
-	s.sessMu.Unlock()
-	setCookie(w, r, sessionCookieName, value, expires, s.sessionTTL())
+	s.issueSessionFor(w, r, store.OwnerID)
 }
 
-// sessionValid reports whether the request carries a live passkey session.
+// issueSessionFor opens a session for one account and sets the cookie.
+//
+// The session lives in the database, not in memory. Two reasons, and the
+// second one is the reason it moved: a restart no longer signs every browser
+// out, and a session has to name the account it belongs to once the file holds
+// more than one person.
+func (s *Server) issueSessionFor(w http.ResponseWriter, r *http.Request, accountID string) {
+	value, err := s.Store.NewSession(accountID, s.sessionTTL())
+	if err != nil {
+		s.Log.Error("cannot open a session", "err", err)
+		return
+	}
+	setCookie(w, r, sessionCookieName, value, s.Now().Add(s.sessionTTL()), s.sessionTTL())
+}
+
+// sessionValid reports whether the request carries a live session.
 func (s *Server) sessionValid(r *http.Request) bool {
 	c, err := r.Cookie(sessionCookieName)
 	if err != nil || c.Value == "" {
 		return false
 	}
-	key := cookieKey(c.Value)
-	s.sessMu.Lock()
-	defer s.sessMu.Unlock()
-	sess, ok := s.sessions[key]
-	if !ok {
-		return false
-	}
-	if !s.Now().Before(sess.expires) {
-		delete(s.sessions, key)
-		return false
-	}
-	// The map found the row by a hash of the cookie. Compare the hash again
-	// without an early exit, so the code holds one rule: every secret in this
-	// package is compared in constant time.
-	return constantEqual(sess.hash, key)
+	_, err = s.Store.SessionAccount(c.Value)
+	return err == nil
 }
 
 // --- the ceremony store -----------------------------------------------------
@@ -624,10 +612,9 @@ func (s *Server) sweepLocked() {
 			delete(s.ceremonies, k)
 		}
 	}
-	for k, v := range s.sessions {
-		if !now.Before(v.expires) {
-			delete(s.sessions, k)
-		}
+	// A session lives in the database now, and it prunes itself there.
+	if err := s.Store.PruneSessions(); err != nil {
+		s.Log.Error("cannot prune the sessions", "err", err)
 	}
 	// A quiet period forgets a failure. Two reasons, and both matter:
 	// an old attack must not leave the owner at the longest wait for ever, and

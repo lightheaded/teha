@@ -37,6 +37,15 @@ button.ghost{background:none;color:var(--accent);border:1px solid var(--line);fo
     <button type="submit" class="ghost">Sign in with the token</button>
   </form>
   <p class="err" id="err"></p>
+
+  <div class="or">or</div>
+  <p>Somebody invited you? Type the code they sent.</p>
+  <form id="joinForm">
+    <input id="joinName" placeholder="Your name" maxlength="60" autocomplete="nickname">
+    <input id="joinCode" placeholder="Invitation code" autocomplete="off" spellcheck="false">
+    <button type="submit" class="ghost" id="joinBtn">Join</button>
+  </form>
+  <p class="err" id="joinErr"></p>
 </div>
 <script type="module" src="/login.js"></script>
 </body>

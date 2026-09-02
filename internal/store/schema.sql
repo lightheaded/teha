@@ -188,3 +188,85 @@ CREATE TABLE IF NOT EXISTS section (
 
 CREATE INDEX IF NOT EXISTS section_by_version ON section(version);
 CREATE INDEX IF NOT EXISTS section_by_project ON section(project_id, order_key);
+
+-- --- the household ----------------------------------------------------------
+-- One file holds one household: the owner, and every person the owner invites.
+-- A project belongs to one account and is shared with none or more others, and
+-- every other row hangs off a project. Visibility is therefore one question:
+-- can this account see this project? See internal/store/account.go.
+--
+-- A session lives here rather than in memory, so a restart does not sign every
+-- browser out and so a session can name the account it belongs to.
+CREATE TABLE IF NOT EXISTS session (
+  id           TEXT PRIMARY KEY,  -- the hash of the cookie value, never the value
+  account_id   TEXT NOT NULL REFERENCES account(id) ON DELETE CASCADE,
+  created_at   TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  expires_at   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS session_by_account ON session(account_id);
+CREATE INDEX IF NOT EXISTS session_by_expiry  ON session(expires_at);
+
+-- An invitation into the household. The code is the second person's way in,
+-- and it is not the owner's device token: a token that is shared to invite
+-- somebody is a token that has to be replaced afterwards.
+--
+-- Only the hash is stored. The code is shown once, when it is made.
+CREATE TABLE IF NOT EXISTS invite (
+  id         TEXT PRIMARY KEY,
+  code_hash  TEXT NOT NULL UNIQUE,
+  name       TEXT NOT NULL,      -- who it is for, so the owner can tell two apart
+  created_by TEXT NOT NULL REFERENCES account(id),
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  used_at    TEXT,
+  used_by    TEXT REFERENCES account(id)
+);
+
+-- One row per person a project is shared with. The owner of a project is not
+-- a member row: ownership lives on the project.
+CREATE TABLE IF NOT EXISTS project_member (
+  project_id TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+  account_id TEXT NOT NULL REFERENCES account(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, account_id)
+);
+
+-- A change to what one account may see. A client cannot learn from a delta
+-- that a row went away, because a scoped pull simply stops sending it. This
+-- table is the record that says "your view changed at version N", and the
+-- next pull with an older version answers "start again".
+CREATE TABLE IF NOT EXISTS membership_change (
+  version    INTEGER PRIMARY KEY,
+  account_id TEXT NOT NULL,
+  at         TEXT NOT NULL
+);
+
+-- A comment is a line of talk on one task. §6.3 of docs/PLAN.md names it, and
+-- `comment:` in the filter grammar searched the description until this table
+-- existed.
+--
+-- The shape follows section: a short id, the three stamps and the version
+-- counter, so a client pulls a comment exactly as it pulls a task.
+--
+-- account_id names the author. Two people share a list, so a comment with no
+-- author reads as if the household said it. The author is also the only person
+-- who may change or remove the line: see commandReach in reach.go.
+--
+-- A comment hangs off a task, and a task hangs off a project, so visibility
+-- needs no column here. A project comment has no row and no place in our
+-- model: docs/BACKLOG.md records that limit.
+CREATE TABLE IF NOT EXISTS comment (
+  id         TEXT PRIMARY KEY,
+  task_id    TEXT NOT NULL REFERENCES task(id),
+  account_id TEXT NOT NULL REFERENCES account(id),
+  body       TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT,
+  version    INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS comment_by_version ON comment(version);
+CREATE INDEX IF NOT EXISTS comment_by_task    ON comment(task_id, created_at);

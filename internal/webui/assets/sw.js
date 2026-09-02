@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// A small offline shell. The app data lives in localStorage, so the worker
-// only needs to keep the shell reachable with no network.
-const CACHE = 'teha-shell-v3';
+// A small offline shell. The app data lives in IndexedDB, which the app reads
+// itself, so the worker only needs to keep the shell reachable with no
+// network.
+const CACHE = 'teha-shell-v7';
 // Every file the app needs for a cold start with no network. parse.js and
 // passkey.js are modules that app.js imports, so a missing entry here breaks
 // the offline start.
-const SHELL = ['/', '/app.js', '/parse.js', '/passkey.js', '/manifest.webmanifest', '/icon.svg'];
+const SHELL = ['/', '/app.js', '/parse.js', '/passkey.js', '/md.js', '/filter.js', '/db.js',
+  '/manifest.webmanifest', '/icon.svg'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

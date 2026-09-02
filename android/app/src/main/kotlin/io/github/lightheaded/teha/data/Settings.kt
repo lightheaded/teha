@@ -26,12 +26,40 @@ class Settings(context: Context) {
         get() = prefs.getString(KEY_TOKEN, "") ?: ""
         set(value) = prefs.edit().putString(KEY_TOKEN, value.trim()).apply()
 
+    /**
+     * accountId is who this phone is, and accountName is what to call them.
+     *
+     * The server answers both on every sync, and `assigned to: me` needs the
+     * id. A phone that has never synced holds an empty id, and that term then
+     * fails with a sentence rather than answering for the wrong person.
+     */
+    var accountId: String
+        get() = prefs.getString(KEY_ACCOUNT, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_ACCOUNT, value.trim()).apply()
+
+    var accountName: String
+        get() = prefs.getString(KEY_ACCOUNT_NAME, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_ACCOUNT_NAME, value.trim()).apply()
+
+    /**
+     * inboxId is the project a capture with no project belongs in.
+     *
+     * Each account has its own inbox, so the fixed id "inbox" is only right
+     * for the owner. The sync answer carries the right one.
+     */
+    var inboxId: String
+        get() = prefs.getString(KEY_INBOX, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_INBOX, value.trim()).apply()
+
     val isConfigured: Boolean
         get() = serverUrl.isNotEmpty()
 
     companion object {
         private const val KEY_SERVER = "server_url"
         private const val KEY_TOKEN = "device_token"
+        private const val KEY_ACCOUNT = "account_id"
+        private const val KEY_ACCOUNT_NAME = "account_name"
+        private const val KEY_INBOX = "inbox_id"
         private const val FILE = "teha_secure"
 
         /** normalize removes a trailing slash, so that path joins stay simple. */

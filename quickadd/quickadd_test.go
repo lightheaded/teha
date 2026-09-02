@@ -16,15 +16,17 @@ import (
 type corpus struct {
 	Today string `json:"today"`
 	Cases []struct {
-		In       string   `json:"in"`
-		Title    string   `json:"title"`
-		Due      string   `json:"due"`
-		Time     string   `json:"time"`
-		Priority int      `json:"priority"`
-		Project  string   `json:"project"`
-		Labels   []string `json:"labels"`
-		RRule    string   `json:"rrule"`
-		Note     string   `json:"note"`
+		In           string   `json:"in"`
+		Title        string   `json:"title"`
+		Due          string   `json:"due"`
+		Time         string   `json:"time"`
+		Priority     int      `json:"priority"`
+		Project      string   `json:"project"`
+		Labels       []string `json:"labels"`
+		RRule        string   `json:"rrule"`
+		RemindAt     string   `json:"remind_at"`
+		RemindBefore int      `json:"remind_before"`
+		Note         string   `json:"note"`
 	} `json:"cases"`
 }
 
@@ -66,6 +68,12 @@ func TestCorpus(t *testing.T) {
 			}
 			if got.RRule != tc.RRule {
 				t.Errorf("rrule: got %q, want %q", got.RRule, tc.RRule)
+			}
+			if got.RemindAt != tc.RemindAt {
+				t.Errorf("remind_at: got %q, want %q", got.RemindAt, tc.RemindAt)
+			}
+			if got.RemindBefore != tc.RemindBefore {
+				t.Errorf("remind_before: got %d, want %d", got.RemindBefore, tc.RemindBefore)
 			}
 			want := tc.Labels
 			if want == nil {

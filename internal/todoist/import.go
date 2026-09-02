@@ -52,7 +52,7 @@ type Summary struct {
 	Sections         int
 	SectionsPresent  int
 	SectionsSkipped  int
-	CommentsFolded   int
+	Comments         int
 	ProjectComments  int
 	FiltersSkipped   int
 	FiltersKept      []string
@@ -573,11 +573,7 @@ func mapTasks(data *Sync, known *existing, sum *Summary, projectOf, sectionOf ma
 				args.SectionID = strptr(local)
 			}
 		}
-		notes := comments[key]
-		if len(notes) > 0 {
-			sum.CommentsFolded += len(notes)
-		}
-		desc := foldDescription(it.Description, repeat, notes)
+		desc := foldDescription(it.Description, repeat)
 		if desc != "" {
 			args.Description = strptr(desc)
 		}
@@ -594,6 +590,28 @@ func mapTasks(data *Sync, known *existing, sum *Summary, projectOf, sectionOf ma
 		}
 		cmds = append(cmds, command("task_add", "import-task-"+key, args))
 		sum.Tasks++
+
+		// A comment is a row of its own since the comment table arrived, so it
+		// no longer folds into the description. The original posting time
+		// rides with it, or a conversation of a year arrives as one moment.
+		//
+		// Only a task this run creates gets its comments. A task that an
+		// earlier run wrote keeps the row it has, and its comments are already
+		// in the store or already in its description: see the note on
+		// foldDescription.
+		for _, n := range comments[key] {
+			body := strings.TrimSpace(n.Content)
+			if body == "" {
+				continue
+			}
+			cmds = append(cmds, command("comment_add", "import-comment-"+n.ID.String(), store.CommentArgs{
+				ID:        id.New("cm"),
+				TaskID:    strptr(newID),
+				Body:      strptr(body),
+				CreatedAt: strptr(n.PostedAt),
+			}))
+			sum.Comments++
+		}
 
 		if completed {
 			cmds = append(cmds, command("task_complete", "import-done-"+key, store.IDArgs{ID: newID}))
@@ -697,15 +715,15 @@ func splitDue(d *Due) (string, string) {
 	return when.Format("2006-01-02"), when.Format("15:04")
 }
 
-// foldDescription puts the parts that our schema cannot hold into the task
-// description: a repeat rule that did not convert, and the comments.
+// foldDescription puts the part that our schema cannot hold into the task
+// description: a repeat rule that did not convert.
 //
-// The section name used to go in here as well. It is a real row since the
-// section table arrived, so it does not. A task that an EARLIER import wrote
-// still carries the line "Section: <name>" at the top of its description, and
-// a second import does not clean it: the task matches by source_ref and the
+// The section name used to go in here, and so did every comment. Both are real
+// rows now, so neither does. A task that an EARLIER import wrote still carries
+// the line "Section: <name>" or a "Comments:" block in its description, and a
+// second import does not clean it: the task matches by source_ref and the
 // importer keeps the row it already has. See docs/USAGE.md section 7.
-func foldDescription(base, repeat string, notes []Note) string {
+func foldDescription(base, repeat string) string {
 	var b strings.Builder
 	base = strings.TrimRight(base, "\n")
 	if base != "" {
@@ -716,15 +734,6 @@ func foldDescription(base, repeat string, notes []Note) string {
 			b.WriteString("\n")
 		}
 		b.WriteString("Repeat: " + repeat + "\n")
-	}
-	if len(notes) > 0 {
-		if b.Len() > 0 {
-			b.WriteString("\n")
-		}
-		b.WriteString("Comments:\n")
-		for _, n := range notes {
-			b.WriteString("- " + strings.TrimSpace(n.Content) + "\n")
-		}
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -754,7 +763,7 @@ func (s Summary) Write(w io.Writer) {
 	if s.SectionsSkipped > 0 {
 		fmt.Fprintf(w, "Sections whose project did not arrive: %d. Their tasks are in the inbox with no section.\n", s.SectionsSkipped)
 	}
-	fmt.Fprintf(w, "Comments moved into a description: %d.\n", s.CommentsFolded)
+	fmt.Fprintf(w, "Comments: %d.\n", s.Comments)
 	if s.ProjectComments > 0 {
 		fmt.Fprintf(w, "Project comments have no place in our model, so %d were skipped.\n", s.ProjectComments)
 	}

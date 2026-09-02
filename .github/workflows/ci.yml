@@ -51,8 +51,11 @@ jobs:
         with:
           node-version: 24
 
-      - name: Parser tests
-        run: node --test internal/webui/assets/parse.test.mjs
+      - name: Web tests
+        # The quick add corpus, the filter corpus and the Markdown corpus. Each
+        # one is a contract between a client and the server, so a drift in any
+        # of them fails here and not in somebody's list.
+        run: node --test internal/webui/assets/*.test.mjs
 
   docker:
     runs-on: ubuntu-latest

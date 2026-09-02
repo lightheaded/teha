@@ -1,0 +1,51 @@
+{
+  "comment": "Shared Markdown corpus. `html` is what the web renderer in internal/webui/assets/md.js writes. A client that draws Markdown another way, for example a Compose client that builds an AnnotatedString, must still read the same input the same way: the same links, the same emphasis, the same list shape, and the same refusal of an unsafe target. A change starts with a case here.",
+  "inline": [
+    { "in": "plain text", "html": "plain text" },
+    { "in": "a <script>alert(1)</script> tag", "html": "a &lt;script&gt;alert(1)&lt;/script&gt; tag" },
+    { "in": "**bold** and *italic*", "html": "<strong>bold</strong> and <em>italic</em>" },
+    { "in": "__bold__ and _italic_", "html": "<strong>bold</strong> and <em>italic</em>" },
+    { "in": "~~gone~~", "html": "<del>gone</del>" },
+    { "in": "call `teha add`", "html": "call <code>teha add</code>" },
+    { "in": "a snake_case_word stays whole", "html": "a snake_case_word stays whole" },
+    { "in": "2 * 3 * 4", "html": "2 * 3 * 4" },
+    { "in": "[the plan](https://example.org/plan)", "html": "<a href=\"https://example.org/plan\" target=\"_blank\" rel=\"noopener noreferrer\">the plan</a>" },
+    { "in": "[**the** plan](https://example.org/p)", "html": "<a href=\"https://example.org/p\" target=\"_blank\" rel=\"noopener noreferrer\"><strong>the</strong> plan</a>" },
+    { "in": "[a `flag`](https://example.org/p)", "html": "<a href=\"https://example.org/p\" target=\"_blank\" rel=\"noopener noreferrer\">a <code>flag</code></a>" },
+    { "in": "[nope](javascript:alert(1))", "html": "[nope](javascript:alert(1))", "note": "an unsafe target stays plain text" },
+    { "in": "[nope](data:text/html,x)", "html": "[nope](data:text/html,x)" },
+    { "in": "[mail me](mailto:a@example.org)", "html": "<a href=\"mailto:a@example.org\" target=\"_blank\" rel=\"noopener noreferrer\">mail me</a>" },
+    { "in": "[settings](/#settings)", "html": "<a href=\"/#settings\">settings</a>", "note": "a target inside the app opens in the same tab" },
+    { "in": "see https://example.org/x for more", "html": "see <a href=\"https://example.org/x\" target=\"_blank\" rel=\"noopener noreferrer\">https://example.org/x</a> for more" },
+    { "in": "see https://example.org/x.", "html": "see <a href=\"https://example.org/x\" target=\"_blank\" rel=\"noopener noreferrer\">https://example.org/x</a>." },
+    { "in": "(https://example.org/x)", "html": "(<a href=\"https://example.org/x\" target=\"_blank\" rel=\"noopener noreferrer\">https://example.org/x</a>)" },
+    { "in": "[x](https://example.org/a?b=1&c=2)", "html": "<a href=\"https://example.org/a?b=1&amp;c=2\" target=\"_blank\" rel=\"noopener noreferrer\">x</a>", "note": "the ampersand is escaped once, in the href and nowhere else" },
+    { "in": "`<b>` stays literal", "html": "<code>&lt;b&gt;</code> stays literal" },
+    { "in": "an \"attribute\" quote", "html": "an &quot;attribute&quot; quote" }
+  ],
+  "blocks": [
+    { "in": "one\ntwo", "html": "<p>one<br>two</p>", "note": "one newline is a line break, not a space. A note is not prose." },
+    { "in": "one\n\ntwo", "html": "<p>one</p><p>two</p>" },
+    { "in": "# Title", "html": "<h1>Title</h1>" },
+    { "in": "### Third", "html": "<h3>Third</h3>" },
+    { "in": "#not a heading", "html": "<p>#not a heading</p>" },
+    { "in": "- one\n- two", "html": "<ul><li>one</li><li>two</li></ul>" },
+    { "in": "1. one\n2. two", "html": "<ol><li>one</li><li>two</li></ol>" },
+    { "in": "- one\n  - deep\n- two", "html": "<ul><li>one<ul><li>deep</li></ul></li><li>two</li></ul>" },
+    { "in": "- [ ] open\n- [x] done", "html": "<ul class=\"md-tasks\"><li><span class=\"md-box\">&#9744;</span><span class=\"\">open</span></li><li><span class=\"md-box\">&#9745;</span><span class=\"md-done\">done</span></li></ul>" },
+    { "in": "> quoted\n> lines", "html": "<blockquote><p>quoted<br>lines</p></blockquote>" },
+    { "in": "---", "html": "<hr>" },
+    { "in": "```\ncode & <tags>\n```", "html": "<pre><code>code &amp; &lt;tags&gt;</code></pre>" },
+    { "in": "```sh\ngo test ./...\n```", "html": "<pre><code>go test ./...</code></pre>" },
+    { "in": "text\n- a list right after", "html": "<p>text</p><ul><li>a list right after</li></ul>" },
+    { "in": "  ", "html": "" }
+  ],
+  "paste": [
+    { "value": "read the plan", "start": 9, "end": 13, "paste": "https://example.org/p", "out": "read the [plan](https://example.org/p)", "caret": 38 },
+    { "value": "read the plan", "start": 9, "end": 13, "paste": "not a url", "out": null, "note": "an ordinary paste is left to the browser" },
+    { "value": "read the plan", "start": 4, "end": 4, "paste": "https://example.org/p", "out": null, "note": "no selection, so the URL is pasted as it is" },
+    { "value": "https://a.example", "start": 0, "end": 17, "paste": "https://example.org/p", "out": null, "note": "a URL over a URL is a replacement, not a link" },
+    { "value": "read [the plan](x)", "start": 5, "end": 18, "paste": "https://example.org/p", "out": null, "note": "a link inside a link is never what a person means" },
+    { "value": "read the plan", "start": 9, "end": 13, "paste": "javascript:alert(1)", "out": null }
+  ]
+}

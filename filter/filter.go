@@ -8,6 +8,7 @@
 //	today | tomorrow | overdue | od | no date | no time | recurring
 //	subtask | !subtask | done | p1..p4 | no priority
 //	#Project | ##Project | /Section | no section | %label | @label | search: text
+//	assigned | unassigned | assigned to: me | assigned to: <name>
 //	before: <date> | after: <date> | deadline | no deadline
 //	& (and) | (or) ! (not) ( ) , (or, one saved filter shows several lists)
 //
@@ -253,6 +254,18 @@ func (p *parser) term(word string) (string, []any, error) {
 		return s.SectionID + " IS NULL", nil, nil
 	case "no label", "no labels":
 		return p.noLabels(), nil, nil
+	case "assigned":
+		if err := p.needAssignee(); err != nil {
+			return "", nil, err
+		}
+		return fmt.Sprintf("(%[1]s IS NOT NULL AND %[1]s <> '')", s.Assignee), nil, nil
+	case "unassigned", "not assigned", "no assignee":
+		if err := p.needAssignee(); err != nil {
+			return "", nil, err
+		}
+		return fmt.Sprintf("(%[1]s IS NULL OR %[1]s = '')", s.Assignee), nil, nil
+	case "assigned to me", "mine":
+		return p.assignedTo("me")
 	case "started":
 		return fmt.Sprintf("(%[1]s IS NULL OR %[1]s <= ?)", s.StartDate), []any{day(0)}, nil
 	case "not started", "deferred":
@@ -338,13 +351,18 @@ func (p *parser) term(word string) (string, []any, error) {
 			return p.search(v)
 		case "comment", "note":
 			// Todoist cannot search the text of a comment, and section 6.3
-			// closes that gap. Our schema has no comment table yet, so a
-			// comment lives in the description: the importer folds one in, and
-			// the clients write one there. The term therefore searches the
-			// description only, and it points at the right column on the day
-			// the table arrives.
+			// closes that gap. A comment is a row of its own since the comment
+			// table arrived, so the term reads that table.
+			//
+			// A store with no comment table fails here. It used to search the
+			// description, which was right while a comment lived there, and is
+			// an answer that is close and wrong now that one does not.
+			if p.s.Comment == "" {
+				return "", nil, fmt.Errorf("comment: needs a comment table, and this client keeps none")
+			}
 			like := "%" + strings.ToLower(v) + "%"
-			return fmt.Sprintf("lower(%s) LIKE ?", p.s.Description), []any{like}, nil
+			return fmt.Sprintf(`%s IN (SELECT %s FROM %s WHERE lower(%s) LIKE ? AND %s IS NULL)`,
+				p.s.ID, p.s.CommentTask, p.s.Comment, p.s.CommentBody, p.s.DeletedAt), []any{like}, nil
 		case "with subtasks", "with sub-tasks", "family":
 			// Todoist shows a matching sub-task without its parent, and a
 			// matching parent without its sub-tasks. This term answers with the
@@ -360,6 +378,8 @@ func (p *parser) term(word string) (string, []any, error) {
 					fmt.Sprintf(" OR %s IN (SELECT %s FROM %s WHERE ", p.s.ParentID, p.s.ID, p.s.Task) + inner + ")" +
 					fmt.Sprintf(" OR %s IN (SELECT %s FROM %s WHERE %s IS NOT NULL AND ", p.s.ID, p.s.ParentID, p.s.Task, p.s.ParentID) + inner + "))",
 				args, nil
+		case "assigned to", "assignee":
+			return p.assignedTo(v)
 		case "date", "due":
 			d, err := p.date(v)
 			if err != nil {
@@ -413,6 +433,52 @@ func (p *parser) term(word string) (string, []any, error) {
 
 	// A bare word searches the title, which is what a person expects.
 	return p.search(low)
+}
+
+// needAssignee refuses a term that names a column this store has not got.
+func (p *parser) needAssignee() error {
+	if p.s.Assignee == "" {
+		return fmt.Errorf("an assignee term needs an assignee column, and this client keeps none")
+	}
+	return nil
+}
+
+// assignedTo matches the person who does a task.
+//
+// Three values, and the last one is the useful one in a household:
+//
+//	me       the account that is asking
+//	nobody   a task in a shared list that nobody picked up
+//	<name>   the person of that name
+func (p *parser) assignedTo(v string) (string, []any, error) {
+	if err := p.needAssignee(); err != nil {
+		return "", nil, err
+	}
+	s := p.s
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "me", "myself":
+		if s.Me == "" {
+			return "", nil, fmt.Errorf("assigned to: me needs to know who is asking, and this client does not")
+		}
+		return s.Assignee + " = ?", []any{s.Me}, nil
+	case "nobody", "none", "no one", "noone":
+		return fmt.Sprintf("(%[1]s IS NULL OR %[1]s = '')", s.Assignee), nil, nil
+	case "anyone", "somebody", "someone":
+		return fmt.Sprintf("(%[1]s IS NOT NULL AND %[1]s <> '')", s.Assignee), nil, nil
+	}
+	if s.Account == "" {
+		return "", nil, fmt.Errorf("assigned to: a name needs a list of people, and this client keeps none")
+	}
+	// A name, matched the way a project name is matched: exact, and case does
+	// not count. A store that keeps a display name matches that as well,
+	// because that is what a person reads in the app.
+	name := strings.TrimSpace(v)
+	if s.AccountDisplay == "" {
+		return fmt.Sprintf(`%s IN (SELECT %s FROM %s WHERE lower(%s) = lower(?))`,
+			s.Assignee, s.ID, s.Account, s.Name), []any{name}, nil
+	}
+	return fmt.Sprintf(`%s IN (SELECT %s FROM %s WHERE lower(%s) = lower(?) OR lower(%s) = lower(?))`,
+		s.Assignee, s.ID, s.Account, s.Name, s.AccountDisplay), []any{name, name}, nil
 }
 
 // search matches text in the title or the description.

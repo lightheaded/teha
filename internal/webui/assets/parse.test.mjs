@@ -20,6 +20,8 @@ for (const c of corpus.cases) {
     assert.equal(got.priority || 0, c.priority || 0, 'priority');
     assert.equal(got.project || '', c.project || '', 'project');
     assert.equal(got.rrule || '', c.rrule || '', 'rrule');
+    assert.equal(got.remindAt || '', c.remind_at || '', 'remind_at');
+    assert.equal(got.remindBefore || 0, c.remind_before || 0, 'remind_before');
     assert.deepEqual(got.labels || [], c.labels || [], 'labels');
   });
 }

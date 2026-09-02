@@ -89,10 +89,11 @@ The panel takes the same line as the web app and the command line client:
 whole syntax.
 
 The panel is on top of every window, and it gives the keyboard back to the
-application you came from when it closes. On macOS this works because the shell
-is an accessory application while the panel is the only window on the screen:
-it has no Dock icon and no place in the application switcher. The window that
-hosts the web app takes the Dock icon back while it is open.
+application you came from when it closes. On macOS the shell hides itself when
+the panel was its only window on the screen, and macOS then activates the
+application that was in front before. The shell stays a regular application
+with a Dock icon. A click on the Dock icon opens the window that hosts the web
+app, and the red close button hides that window and keeps the icon.
 
 The panel also closes when it loses the keyboard, so a click somewhere else
 does not leave it on the screen.
@@ -234,7 +235,5 @@ colour, so one file follows a light and a dark menu bar.
   from a terminal: `/Applications/teha.app/Contents/MacOS/teha`.
 - **No offline settings check.** The shell cannot tell a wrong address from a
   server that is down. Both look like a page that does not load.
-- **No `Cargo.lock` yet.** The first build on a machine with Rust writes it,
-  and it belongs in the repository after that. See `docs/BACKLOG.md`.
 
 `docs/BACKLOG.md` holds the rest, with the reason for each one.

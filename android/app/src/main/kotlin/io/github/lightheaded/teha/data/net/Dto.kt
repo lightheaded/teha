@@ -21,6 +21,16 @@ data class ProjectDto(
 )
 
 @Serializable
+data class SectionDto(
+    val id: String,
+    @SerialName("project_id") val projectId: String = "",
+    val name: String = "",
+    @SerialName("order_key") val orderKey: String = "",
+    @SerialName("deleted_at") val deletedAt: String? = null,
+    @SerialName("v") val version: Long = 0,
+)
+
+@Serializable
 data class LabelDto(
     val id: String,
     val name: String = "",
@@ -33,6 +43,8 @@ data class LabelDto(
 data class TaskDto(
     val id: String,
     @SerialName("project_id") val projectId: String = "inbox",
+    @SerialName("section_id") val sectionId: String? = null,
+    @SerialName("assignee_id") val assigneeId: String? = null,
     @SerialName("parent_id") val parentId: String? = null,
     @SerialName("order_key") val orderKey: String = "",
     val title: String = "",
@@ -73,8 +85,46 @@ data class SyncResponse(
     val version: Long = 0,
     val applied: List<AppliedDto> = emptyList(),
     val projects: List<ProjectDto> = emptyList(),
+    val sections: List<SectionDto> = emptyList(),
     val labels: List<LabelDto> = emptyList(),
     val tasks: List<TaskDto> = emptyList(),
+    // reset means "throw away what you hold and pull from zero". It arrives
+    // when a shared list stops being shared: a scoped pull cannot report that
+    // a row went away, so the server says so once. See store.Delta.
+    val reset: Boolean = false,
+    // inbox and me name the account that is asking. Each account has its own
+    // inbox, so a capture with no project must not assume the fixed id.
+    val inbox: String = "",
+    val me: String = "",
+)
+
+/** The request and the answer of POST /v1/join. It carries no token. */
+@Serializable
+data class JoinRequest(val code: String, val name: String)
+
+@Serializable
+data class JoinResponse(
+    val ok: Boolean = false,
+    // The device token, shown once. Every later request carries it.
+    val token: String = "",
+    val account: String = "",
+    val name: String = "",
+)
+
+/** One person in the household, from GET /v1/household. */
+@Serializable
+data class PersonDto(
+    val id: String,
+    val name: String = "",
+    @SerialName("is_me") val isMe: Boolean = false,
+    @SerialName("is_owner") val isOwner: Boolean = false,
+)
+
+@Serializable
+data class HouseholdResponse(
+    val me: String = "",
+    val inbox: String = "",
+    val people: List<PersonDto> = emptyList(),
 )
 
 @Serializable

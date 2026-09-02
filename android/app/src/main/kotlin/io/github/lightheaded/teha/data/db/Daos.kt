@@ -79,6 +79,39 @@ interface ProjectDao {
 }
 
 @Dao
+interface SectionDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(sections: List<SectionEntity>)
+
+    @Query("SELECT * FROM sections WHERE deletedAt IS NULL ORDER BY projectId ASC, orderKey ASC, name ASC")
+    fun all(): Flow<List<SectionEntity>>
+
+    @Query("SELECT * FROM sections WHERE deletedAt IS NULL")
+    suspend fun allNow(): List<SectionEntity>
+
+    @Query("DELETE FROM sections")
+    suspend fun clear()
+}
+
+@Dao
+interface AccountDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(accounts: List<AccountEntity>)
+
+    @Query("SELECT * FROM accounts ORDER BY isOwner DESC, name ASC")
+    fun all(): Flow<List<AccountEntity>>
+
+    @Query("SELECT * FROM accounts")
+    suspend fun allNow(): List<AccountEntity>
+
+    // The household is answered whole by GET /v1/household, so a write
+    // replaces the table rather than merging into it: a person who left must
+    // not stay in the list.
+    @Query("DELETE FROM accounts")
+    suspend fun clear()
+}
+
+@Dao
 interface LabelDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(labels: List<LabelEntity>)

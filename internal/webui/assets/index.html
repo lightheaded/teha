@@ -109,6 +109,42 @@ header .st{margin-left:auto;font-size:12.5px;color:var(--ink-3);font-family:var(
 .d-actions .d-del{color:var(--p1);border-color:transparent;background:none;padding-left:0}
 .d-actions .d-close{margin-left:auto;background:var(--accent);color:var(--accent-ink);border-color:transparent;font-weight:600}
 .d-hint{font-size:12.5px;color:var(--ink-3)}
+/* Rendered Markdown: a note in the detail sheet, and the inline part of a
+   task title in a row. The type scale stays close to the body text, because a
+   note inside a panel that jumps to 32px reads as a different application. */
+.md{overflow-wrap:anywhere}
+.md>*:first-child{margin-top:0}
+.md>*:last-child{margin-bottom:0}
+.md p{margin:0 0 8px}
+.md h1,.md h2,.md h3,.md h4,.md h5,.md h6{margin:12px 0 6px;line-height:1.25}
+.md h1{font-size:19px} .md h2{font-size:17px} .md h3{font-size:16px}
+.md h4,.md h5,.md h6{font-size:15px;color:var(--ink-2)}
+.md ul,.md ol{margin:0 0 8px;padding-left:22px}
+.md li{margin:2px 0}
+.md ul.md-tasks{list-style:none;padding-left:2px}
+.md .md-box{display:inline-block;width:18px;color:var(--ink-3)}
+.md .md-done{color:var(--ink-3);text-decoration:line-through}
+.md blockquote{margin:0 0 8px;padding:2px 0 2px 12px;border-left:3px solid var(--line);color:var(--ink-2)}
+.md hr{border:none;border-top:1px solid var(--line);margin:12px 0}
+.md code{font-family:var(--mono);font-size:13.5px;background:var(--bg-2);border:1px solid var(--line);border-radius:4px;padding:0 4px}
+.md pre{margin:0 0 8px;padding:9px 11px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;overflow-x:auto}
+.md pre code{border:none;background:none;padding:0;font-size:13px}
+.md a,.row .t a{color:var(--accent);text-decoration:underline;text-underline-offset:2px}
+.md a:hover,.row .t a:hover{text-decoration-thickness:2px}
+.md strong{font-weight:650}
+/* The note reads as Markdown and edits as text. The reading half carries the
+   same box as the field it replaces, so the panel does not move on a click. */
+.d-note{display:grid}
+.d-md{min-height:44px;padding:8px 10px;border:1px solid transparent;border-radius:7px;cursor:text}
+.d-md:hover{border-color:var(--line)}
+.d-md:focus-visible{outline:2px solid var(--accent);outline-offset:0}
+.d-mdhint kbd{margin-right:2px}
+.row .meta .nt{color:var(--ink-3)}
+/* The filter field. Every term the server reads, the browser reads, so the
+   field takes any query and not a canned list. */
+header .filt{flex:1 1 180px;min-width:120px;max-width:320px;padding:4px 9px;font:inherit;font-size:13px;
+  color:var(--ink);background:var(--bg-2);border:1px solid var(--line);border-radius:7px}
+header .filt:focus{outline:2px solid var(--accent);border-color:transparent;background:var(--card)}
 header .gear{background:none;border:none;padding:0 2px;font-size:17px;line-height:1;color:var(--ink-3);cursor:pointer}
 header .gear:hover{color:var(--accent)}
 .set h3{margin:0;font-size:16px}
@@ -141,11 +177,98 @@ header .gear:hover{color:var(--accent)}
 .col.add{background:none;border-style:dashed}
 .col-new,.col-rename{width:100%;padding:7px 8px;font:inherit;font-size:14px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:7px}
 .col-new:focus,.col-rename:focus{outline:2px solid var(--accent);border-color:transparent}
+/* The calendar layout. A month or a week of the current view, with a strip of
+   the undated tasks below it. The grid scrolls with the list, and a cell grows
+   with what it holds, so nothing is hidden without a word. */
+.lay.on{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.cal{padding:2px 2px 10px}
+.cal-head{display:flex;align-items:center;gap:8px;padding:2px 2px 10px;flex-wrap:wrap}
+.cal-nav{background:var(--bg-2);border:1px solid var(--line);border-radius:7px;padding:3px 10px;font-size:13px;color:var(--ink);cursor:pointer}
+.cal-nav:hover{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.cal-title{font-size:15px;font-weight:600;margin-left:4px}
+.cal-modes{margin-left:auto;display:flex;gap:4px}
+.cal-modes button{background:none;border:1px solid var(--line);border-radius:7px;padding:3px 10px;font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);cursor:pointer}
+.cal-modes button.on{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.cal-out{font-size:12.5px;color:var(--ink-3)}
+.cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.cal-dow{background:var(--bg-2);padding:5px 8px;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+.cal-day{background:var(--card);min-height:92px;padding:4px 5px 6px;display:flex;flex-direction:column;gap:2px}
+.cal-week .cal-day{min-height:340px}
+.cal-day.out{background:var(--bg-2)}
+.cal-day.now{box-shadow:inset 0 2.5px 0 var(--accent)}
+.cal-day.over{background:color-mix(in srgb,var(--accent) 14%,var(--card))}
+.cal-num{font-size:11.5px;color:var(--ink-3);font-variant-numeric:tabular-nums;padding:0 2px 1px}
+.cal-day.now .cal-num{color:var(--accent);font-weight:700}
+/* A chip is a row in miniature: the same cursor, the same pick tint, the same
+   priority colour, and no completion circle, because a day cell is small. */
+.chip{display:flex;gap:5px;align-items:baseline;padding:3px 5px;border-radius:6px;background:var(--bg-2);font-size:12.5px;cursor:grab;border-left:2.5px solid transparent}
+.chip:hover{background:color-mix(in srgb,var(--accent) 10%,var(--bg-2))}
+.chip.p1{border-left-color:var(--p1)} .chip.p2{border-left-color:var(--p2)} .chip.p3{border-left-color:var(--p3)}
+.chip.sel{box-shadow:inset 0 0 0 1.5px var(--accent)}
+.chip.mk{background:color-mix(in srgb,var(--accent) 20%,transparent)}
+.chip.done .t{text-decoration:line-through;color:var(--ink-3)}
+.chip .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.chip .chip-at{flex:none;color:var(--ink-3);font-variant-numeric:tabular-nums;font-size:11.5px}
+.cal-un{margin-top:10px;border:1px dashed var(--line);border-radius:10px;padding:7px 8px}
+.cal-un.over{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.cal-unhead{display:flex;gap:8px;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);padding:0 2px 5px}
+.cal-unrow{display:flex;gap:5px;flex-wrap:wrap}
+.cal-unrow .chip{max-width:260px}
+.cal-unempty{font-size:12.5px;color:var(--ink-3)}
 kbd{font-family:var(--mono);font-size:12px;background:var(--bg-2);border:1px solid var(--line);border-radius:4px;padding:1px 5px}
 .d-err{color:var(--p1);font-size:12.5px;min-height:1.2em}
 .pk{display:flex;align-items:center;gap:10px;font-size:14.5px;color:var(--ink-2)}
 .pk .w{color:var(--ink-3);font-size:12.5px}
 .pk .rm{margin-left:auto;background:none;border:none;color:var(--p1);font-size:12.5px;cursor:pointer;padding:0}
+/* The household. A shared list carries a dot and a button, a task that
+   somebody else does carries their name, and an invitation code is shown once
+   so it must be easy to copy. */
+nav a .sh{color:var(--accent);font-size:9px;line-height:1}
+nav a .pmenu{background:none;border:none;padding:0 2px;color:var(--ink-3);cursor:pointer;font-size:13px;line-height:1;visibility:hidden}
+nav a:hover .pmenu,nav a.on .pmenu{visibility:visible}
+nav a .pmenu:hover{color:var(--accent)}
+.row .meta .who{color:var(--accent)}
+.row .meta .cm{color:var(--ink-3)}
+/* Shopping mode. The targets are big on purpose: this screen is read at arm's
+   length, with one hand, often beside the shop's own app in split screen, so
+   every rule here is sized for roughly half a phone width and never narrower
+   than a thumb. See PLAN.md section 4. */
+.shop{display:grid;gap:14px;padding:6px 0 80px}
+.shop .shopadd{font-size:17px;padding:14px 14px;border:1px solid var(--line);border-radius:10px;
+  background:var(--card);color:var(--ink);width:100%;box-sizing:border-box}
+.shop .aisle,.shop .bag{display:grid;gap:2px}
+.shop .ahead{display:flex;align-items:center;gap:8px;padding:8px 2px 2px;font-size:12px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+.shop .ahead .n{color:var(--ink-3)}
+.shop .ahead .clearbag{margin-left:auto;background:none;border:1px solid var(--line);
+  border-radius:6px;padding:4px 10px;font-size:11px;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--accent);cursor:pointer}
+.shop .shoprow{padding:14px 10px;gap:14px;align-items:center}
+.shop .shoprow .box{width:30px;height:30px;flex:none}
+.shop .shoprow .t{font-size:17px;display:flex;align-items:center;gap:10px}
+.shop .shoprow .qty{flex:none;min-width:30px;padding:2px 7px;border-radius:7px;text-align:center;
+  background:var(--accent);color:var(--accent-ink);font-weight:600;font-size:15px}
+.shop .bag .shoprow{opacity:.55}
+.shop .recent{display:block}
+.shop .sug{margin:0 6px 6px 0;background:var(--bg-2);border:1px solid var(--line);
+  border-radius:16px;padding:9px 14px;font-size:15px;color:var(--ink);cursor:pointer}
+.shop .sug:hover{border-color:var(--accent);color:var(--accent)}
+/* The talk on a task. One line per person, the name and the age above the
+   words, so a conversation of five lines still reads at a glance. */
+.d-talk{display:grid;gap:8px;border-top:1px solid var(--line);padding-top:10px}
+.d-talklist{display:grid;gap:10px}
+.cmrow{display:grid;gap:3px}
+.cmwho{display:flex;align-items:center;gap:8px;font-size:12px;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--ink-3)}
+.cmwhen{text-transform:none;letter-spacing:0}
+.cmdel{margin-left:auto;background:none;border:none;color:var(--ink-3);cursor:pointer;
+  font-size:15px;line-height:1;padding:0 2px}
+.cmdel:hover{color:var(--p1)}
+.cmbody{font-size:14.5px}
+.cmbody[tabindex]{cursor:text;border-radius:6px}
+.cmbody[tabindex]:hover{background:var(--bg-2)}
+.code{display:block;margin-top:6px;padding:8px 10px;font-family:var(--mono);font-size:14px;
+  background:var(--bg-2);border:1px solid var(--line);border-radius:7px;overflow-wrap:anywhere;user-select:all}
 [hidden]{display:none}
 </style>
 </head>
@@ -159,6 +282,10 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--bg-2);border:1px sol
     <header>
       <h2 id="title">Today</h2><span class="n" id="count"></span>
       <button class="lay" id="layout" hidden>Board</button>
+      <button class="lay" id="caltoggle">Calendar</button>
+      <button class="lay" id="shoptoggle" hidden>Shop</button>
+      <input class="filt" id="filter" placeholder="Filter, press /" aria-label="Filter"
+             autocomplete="off" spellcheck="false">
       <span class="st" id="status"></span>
       <button class="gear" id="gear" aria-label="Settings" title="Settings">&#9881;</button>
     </header>

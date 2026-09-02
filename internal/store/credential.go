@@ -7,19 +7,10 @@ import (
 	"database/sql"
 )
 
-// OwnerID is the fixed id of the one account this build holds. A second
-// account belongs to milestone M6.
+// OwnerID is the fixed id of the first account in the file. Every other
+// account arrives through an invitation. See internal/store/account.go, which
+// holds the Account type and the household.
 const OwnerID = "owner"
-
-// Account is one person who signs in. The user handle is the opaque identifier
-// that an authenticator stores beside a passkey, so it must never change.
-type Account struct {
-	ID          string `json:"id"`
-	UserHandle  []byte `json:"-"`
-	Name        string `json:"name"`
-	DisplayName string `json:"display_name"`
-	CreatedAt   string `json:"created_at"`
-}
 
 // Credential is one passkey. The store keeps the fields a login must verify
 // and the fields the owner reads in a list.
@@ -57,25 +48,15 @@ func (s *Store) seedOwner() error {
 	if _, err := rand.Read(handle); err != nil {
 		return err
 	}
-	_, err := s.db.Exec(`INSERT INTO account (id, user_handle, name, display_name, created_at)
-		VALUES (?,?,?,?,?)`, OwnerID, handle, "owner", "teha owner", s.stamp())
+	_, err := s.db.Exec(`INSERT INTO account
+		(id, user_handle, name, display_name, created_at, inbox_id, is_owner)
+		VALUES (?,?,?,?,?,?,1)`, OwnerID, handle, "owner", "teha owner", s.stamp(), InboxID)
 	return err
 }
 
 // Owner returns the account this build holds.
 func (s *Store) Owner() (Account, error) {
-	var a Account
-	rows, err := s.db.Query(`SELECT id, user_handle, name, display_name, created_at
-		FROM account WHERE id = ?`, OwnerID)
-	if err != nil {
-		return a, err
-	}
-	defer rows.Close()
-	if !rows.Next() {
-		return a, ErrNotFound
-	}
-	err = rows.Scan(&a.ID, &a.UserHandle, &a.Name, &a.DisplayName, &a.CreatedAt)
-	return a, err
+	return s.AccountByID(OwnerID)
 }
 
 // AccountByUserHandle finds the account an authenticator names. A login reads

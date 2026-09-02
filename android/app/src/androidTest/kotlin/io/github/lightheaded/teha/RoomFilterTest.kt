@@ -101,6 +101,8 @@ class RoomFilterTest {
     ) = TaskEntity(
         id = id,
         projectId = "inbox",
+        sectionId = null,
+        assigneeId = null,
         parentId = null,
         orderKey = "m",
         title = title,

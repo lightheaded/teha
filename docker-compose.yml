@@ -86,8 +86,11 @@ volumes:
 #
 #      docker compose up -d
 #
-# To list what the bucket holds, use the same pattern with the snapshots
-# subcommand:
+# To list what the bucket holds, use the same pattern with the ltx subcommand.
+# The 0.5 line has no `snapshots` command:
 #
 #      docker compose run --rm --entrypoint litestream litestream \
-#        snapshots -config /etc/litestream.yml /data/teha.db
+#        ltx -config /etc/litestream.yml /data/teha.db
+#
+# Rehearse the whole path with scripts/restore-drill.sh, which does all of the
+# above against its own MinIO and compares the rows.

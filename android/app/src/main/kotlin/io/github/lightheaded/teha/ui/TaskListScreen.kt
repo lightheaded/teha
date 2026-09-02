@@ -62,6 +62,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.lightheaded.teha.data.db.AccountEntity
 import io.github.lightheaded.teha.data.db.ProjectEntity
 import io.github.lightheaded.teha.data.db.TaskEntity
 import io.github.lightheaded.teha.ui.theme.priorityColor
@@ -79,6 +80,8 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
     val detail by vm.detail.collectAsStateWithLifecycle()
     val subtasks by vm.detailSubtasks.collectAsStateWithLifecycle()
     val labels by vm.labels.collectAsStateWithLifecycle()
+    val sections by vm.sections.collectAsStateWithLifecycle()
+    val people by vm.people.collectAsStateWithLifecycle()
     val marked by vm.marked.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val selecting = marked.isNotEmpty()
@@ -109,6 +112,7 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
             ViewDrawerSheet(
                 current = state.view,
                 projects = projects,
+                people = people.size,
                 filterError = state.filterError,
                 onPick = { view ->
                     vm.setView(view)
@@ -245,6 +249,7 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
                                 TaskRow(
                                     task = task,
                                     project = projects.firstOrNull { it.id == task.projectId },
+                                    who = assigneeName(task, people, vm.me()),
                                     today = today,
                                     selected = task.id in marked,
                                     selecting = selecting,
@@ -271,6 +276,9 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
             task = openTask,
             subtasks = subtasks,
             projects = projects,
+            sections = sections,
+            people = people,
+            me = vm.me(),
             knownLabels = labels.map { it.name },
             today = today,
             onEdit = vm::edit,
@@ -447,6 +455,9 @@ private fun SelectionBar(
 private fun TaskRow(
     task: TaskEntity,
     project: ProjectEntity?,
+    // who is the name to show for the assignee, and it is empty for a task of
+    // this person's own: a list that says "me" on every row means nothing.
+    who: String,
     today: String,
     selected: Boolean,
     selecting: Boolean,
@@ -493,6 +504,7 @@ private fun TaskRow(
                 if (project != null && !project.isInbox) add("#${project.name}")
                 task.labels.forEach { add("@$it") }
                 if (task.rrule != null) add("repeats")
+                if (who.isNotEmpty()) add(who)
             }
             if (meta.isNotEmpty()) {
                 Text(
@@ -509,6 +521,16 @@ private fun TaskRow(
         }
         PriorityDot(task.priority)
     }
+}
+
+/**
+ * assigneeName is the name to print beside a task, and an empty string for a
+ * task of this person's own or a household of one.
+ */
+private fun assigneeName(task: TaskEntity, people: List<AccountEntity>, me: String): String {
+    val who = task.assigneeId ?: return ""
+    if (who.isEmpty() || who == me || people.size < 2) return ""
+    return people.firstOrNull { it.id == who }?.name ?: "someone"
 }
 
 @Composable

@@ -10,6 +10,11 @@ import androidx.room.TypeConverter
 data class TaskEntity(
     @PrimaryKey val id: String,
     val projectId: String,
+    // sectionId is the heading inside the project, and assigneeId is who does
+    // the task. Both arrived with the household, in database version 2, and
+    // both are null in a list of one person. See TehaDatabase.
+    val sectionId: String?,
+    val assigneeId: String?,
     val parentId: String?,
     val orderKey: String,
     val title: String,
@@ -40,6 +45,42 @@ data class ProjectEntity(
     val isInbox: Boolean,
     val deletedAt: String?,
     val version: Long,
+)
+
+/**
+ * SectionEntity is a heading inside one project, and a column on the board.
+ *
+ * The phone reads it since it joined the household: the filter term /Name
+ * needs the table, and the shared compiler names it `sections`. See
+ * filter/schema.go.
+ */
+@Entity(tableName = "sections")
+data class SectionEntity(
+    @PrimaryKey val id: String,
+    val projectId: String,
+    val name: String,
+    val orderKey: String,
+    val deletedAt: String?,
+    val version: Long,
+)
+
+/**
+ * AccountEntity is one person in the household.
+ *
+ * The phone keeps the list so that a name can be shown beside a task, and so
+ * that `assigned to: <name>` can turn a name into an id. A person has one name
+ * here and two on the server, which is why filter.Schema takes the column
+ * names as a value.
+ *
+ * This table is NOT part of sync. GET /v1/household answers it, and the answer
+ * is small and changes almost never.
+ */
+@Entity(tableName = "accounts")
+data class AccountEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val isMe: Boolean,
+    val isOwner: Boolean,
 )
 
 @Entity(tableName = "labels")

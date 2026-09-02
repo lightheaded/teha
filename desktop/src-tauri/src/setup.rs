@@ -16,7 +16,7 @@ pub const SETTINGS: &str = "settings";
 
 /// Open the settings window, or bring it to the front.
 pub fn open(app: &AppHandle) {
-    policy::regular(app);
+    policy::unhide(app);
     if let Some(window) = app.get_webview_window(SETTINGS) {
         let _ = window.unminimize();
         let _ = window.show();

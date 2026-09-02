@@ -263,20 +263,29 @@ func TestZeroLossEveryInputRowArrives(t *testing.T) {
 		t.Errorf("the section name still folds into the description:\n%s", tyres.Description)
 	}
 
-	// Both comments fold into the description, oldest comment first, and the
-	// description of the task survives all of it.
-	desc := tyres.Description
-	for _, want := range []string{"Four of them, and one spare.",
-		"Book the garage a week ahead.", "The bolts are in the blue box."} {
-		if !strings.Contains(desc, want) {
-			t.Errorf("the description of 600010 lost %q:\n%s", want, desc)
+	// The description of the task survives, and both comments arrive as rows
+	// of their own, oldest comment first.
+	if !strings.Contains(tyres.Description, "Four of them, and one spare.") {
+		t.Errorf("the description of 600010 is lost:\n%s", tyres.Description)
+	}
+	talk, err := st.CommentsFor(tyres.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bodies := make([]string, 0, len(talk))
+	for _, c := range talk {
+		bodies = append(bodies, c.Body)
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("600010 carries %d comments, want 2: %v", len(bodies), bodies)
+	}
+	if !strings.Contains(bodies[0], "Book the garage") || !strings.Contains(bodies[1], "The bolts are") {
+		t.Errorf("the comments are out of order or lost: %v", bodies)
+	}
+	for _, c := range bodies {
+		if strings.Contains(c, "A comment that was deleted") {
+			t.Error("a deleted comment arrived as a row")
 		}
-	}
-	if strings.Contains(desc, "A comment that was deleted") {
-		t.Error("a deleted comment arrived in the description")
-	}
-	if a, b := strings.Index(desc, "Book the garage"), strings.Index(desc, "The bolts are"); a > b {
-		t.Errorf("the comments are out of order in the description:\n%s", desc)
 	}
 
 	// A sub-task three levels deep points at the right parent at every level.

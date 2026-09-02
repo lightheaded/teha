@@ -70,7 +70,7 @@ type ReminderArgs struct {
 	OffsetMin *int    `json:"offset_min,omitempty"`
 }
 
-func reminderAdd(tx *sql.Tx, a ReminderArgs, now string) (string, error) {
+func reminderAdd(tx *sql.Tx, a ReminderArgs, now string, act actor) (string, error) {
 	if a.ID == "" {
 		return "", fmt.Errorf("reminder_add needs a client id")
 	}
@@ -99,9 +99,11 @@ func reminderAdd(tx *sql.Tx, a ReminderArgs, now string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// A reminder belongs to the person who set it, not to the task. Two people
+	// who share a chore each keep their own nudge, or none.
 	_, err = tx.Exec(`INSERT INTO reminder (id, task_id, kind, fire_at, offset_min,
-		created_at, updated_at, version) VALUES (?,?,?,?,?,?,?,?)`,
-		a.ID, a.TaskID, kind, fireAt, a.OffsetMin, now, now, v)
+		account_id, created_at, updated_at, version) VALUES (?,?,?,?,?,?,?,?,?)`,
+		a.ID, a.TaskID, kind, fireAt, a.OffsetMin, act.ID, now, now, v)
 	return a.ID, err
 }
 
@@ -176,7 +178,10 @@ func (s *Store) Reminders(taskID string) ([]Reminder, error) {
 // DueReminder is one reminder that must go out now, with the task fields the
 // notification needs.
 type DueReminder struct {
-	ID        string
+	ID string
+	// AccountID is the person who set it. The sender pushes to that person's
+	// devices and to nobody else's.
+	AccountID string
 	Kind      string
 	TaskID    string
 	Title     string
@@ -226,7 +231,8 @@ func (s *Store) ClaimDue(now time.Time, limit int) (Claim, error) {
 
 	// A point reminder of a task that is closed or deleted is not due at all.
 	// The person acted already, and a notification then is only noise.
-	rows, err := tx.Query(`SELECT r.id, r.kind, r.fire_at, coalesce(r.task_id,''), coalesce(r.offset_min,0),
+	rows, err := tx.Query(`SELECT r.id, coalesce(r.account_id,'`+OwnerID+`'), r.kind, r.fire_at,
+			coalesce(r.task_id,''), coalesce(r.offset_min,0),
 			coalesce(t.title,''), coalesce(t.due_date,''), coalesce(t.due_time,''), coalesce(t.priority,4)
 		FROM reminder r LEFT JOIN task t ON t.id = r.task_id
 		WHERE r.deleted_at IS NULL
@@ -245,7 +251,7 @@ func (s *Store) ClaimDue(now time.Time, limit int) (Claim, error) {
 	for rows.Next() {
 		var d DueReminder
 		var fireAt string
-		if err := rows.Scan(&d.ID, &d.Kind, &fireAt, &d.TaskID, &d.OffsetMin,
+		if err := rows.Scan(&d.ID, &d.AccountID, &d.Kind, &fireAt, &d.TaskID, &d.OffsetMin,
 			&d.Title, &d.DueDate, &d.DueTime, &d.Priority); err != nil {
 			rows.Close()
 			return out, err
@@ -299,9 +305,22 @@ func (s *Store) ClaimDue(now time.Time, limit int) (Claim, error) {
 // DigestSummary counts the open tasks due on or before day and names the first
 // few, so a digest notification says something useful in one line.
 func (s *Store) DigestSummary(day string, names int) (int, []string, error) {
+	return s.DigestSummaryFor(day, names, OwnerID)
+}
+
+// DigestSummaryFor counts what one account has due, and names the first few.
+// A digest that counted the whole household would tell each person how much
+// work the other one has.
+func (s *Store) DigestSummaryFor(day string, names int, accountID string) (int, []string, error) {
+	if accountID == "" {
+		accountID = OwnerID
+	}
+	mine := ` AND project_id IN (SELECT id FROM project WHERE owner_id = ?
+		UNION SELECT project_id FROM project_member WHERE account_id = ?)`
 	var n int
 	err := s.db.QueryRow(`SELECT count(*) FROM task
-		WHERE state = 'open' AND deleted_at IS NULL AND due_date IS NOT NULL AND due_date <= ?`, day).Scan(&n)
+		WHERE state = 'open' AND deleted_at IS NULL AND due_date IS NOT NULL AND due_date <= ?`+mine,
+		day, accountID, accountID).Scan(&n)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -309,8 +328,8 @@ func (s *Store) DigestSummary(day string, names int) (int, []string, error) {
 		return n, nil, nil
 	}
 	rows, err := s.db.Query(`SELECT title FROM task
-		WHERE state = 'open' AND deleted_at IS NULL AND due_date IS NOT NULL AND due_date <= ?
-		ORDER BY due_date, priority LIMIT ?`, day, names)
+		WHERE state = 'open' AND deleted_at IS NULL AND due_date IS NOT NULL AND due_date <= ?`+mine+`
+		ORDER BY due_date, priority LIMIT ?`, day, accountID, accountID, names)
 	if err != nil {
 		return n, nil, err
 	}
@@ -332,6 +351,9 @@ func (s *Store) DigestSummary(day string, names int) (int, []string, error) {
 // plumbing, not account data, so it stays out of sync and out of the change
 // log.
 type PushSubscription struct {
+	// AccountID is the person whose browser this is. An empty value means the
+	// owner, which is what a file written before the household had.
+	AccountID  string `json:"-"`
 	Endpoint   string `json:"endpoint"`
 	P256dh     string `json:"p256dh"`
 	Auth       string `json:"auth"`
@@ -352,23 +374,39 @@ func (s *Store) SaveSubscription(sub PushSubscription) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.stamp()
+	account := sub.AccountID
+	if account == "" {
+		account = OwnerID
+	}
 	_, err := s.db.Exec(`INSERT INTO push_subscription
-			(endpoint, p256dh, auth, user_agent, created_at, fail_count, retry_until)
-			VALUES (?,?,?,?,?,0,NULL)
+			(endpoint, p256dh, auth, user_agent, account_id, created_at, fail_count, retry_until)
+			VALUES (?,?,?,?,?,?,0,NULL)
 		ON CONFLICT(endpoint) DO UPDATE SET
 			p256dh = excluded.p256dh, auth = excluded.auth,
-			user_agent = excluded.user_agent, fail_count = 0, retry_until = NULL`,
-		sub.Endpoint, sub.P256dh, sub.Auth, sub.UserAgent, now)
+			user_agent = excluded.user_agent, account_id = excluded.account_id,
+			fail_count = 0, retry_until = NULL`,
+		sub.Endpoint, sub.P256dh, sub.Auth, sub.UserAgent, account, now)
 	return err
 }
 
 // Subscriptions returns every subscription that is not inside a back-off.
 func (s *Store) Subscriptions(now time.Time) ([]PushSubscription, error) {
+	return s.SubscriptionsFor(now, "")
+}
+
+// SubscriptionsFor returns the devices of one account. An empty account means
+// every device in the file, which is what a test and a one-account file want.
+func (s *Store) SubscriptionsFor(now time.Time, accountID string) ([]PushSubscription, error) {
 	nowUTC := now.UTC().Format(time.RFC3339)
+	where := `WHERE (retry_until IS NULL OR retry_until <= ?)`
+	args := []any{nowUTC}
+	if accountID != "" {
+		where += ` AND coalesce(account_id, ?) = ?`
+		args = append(args, OwnerID, accountID)
+	}
 	rows, err := s.db.Query(`SELECT endpoint, p256dh, auth, user_agent, created_at,
 			coalesce(last_used_at,''), fail_count
-		FROM push_subscription
-		WHERE retry_until IS NULL OR retry_until <= ? ORDER BY created_at`, nowUTC)
+		FROM push_subscription `+where+` ORDER BY created_at`, args...)
 	if err != nil {
 		return nil, err
 	}

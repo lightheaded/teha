@@ -101,6 +101,8 @@ the task has:
 | Time | Only shown when the task has a day. **No time** takes it off. |
 | Priority | p1 to p4. p4 is the default and shows no mark. |
 | Project | One entry per project. The inbox reads as Inbox. |
+| Section | The headings of that project. It is hidden when the project has none. |
+| Who | Everybody the household holds, plus **Nobody**. It is hidden while the household holds one person. |
 | Labels | Every label the account has, as chips, plus a field for a new one. |
 | Repeat | Four presets and a raw RRULE field. The shared Go engine judges the rule. |
 | Starts, Deadline | The same day menu as Due. |
@@ -207,6 +209,26 @@ runs: it takes the table and column names as a value, so one grammar reads two
 databases. D-014 in [../docs/DECISIONS.md](../docs/DECISIONS.md) gives the
 reason, and `filter/schema.go` holds the mapping.
 
+## The household
+
+The phone joins a household since 2026-09-02.
+
+1. The owner writes an invitation in the browser and sends the code.
+2. Open **Settings**, put the server address in, then type your name and the
+   code under **The household** and touch **Join the household**.
+3. The server answers with a device token of your own, and the app keeps it in
+   the encrypted store. The local cache is dropped first, because what it holds
+   belongs to whoever the phone was before. The outbox is not dropped.
+
+After that the phone is that account: its own inbox, its own reminders, and
+only the lists somebody shared with it. **Settings** names everybody in the
+house.
+
+A task in a shared list carries **Who**, and **Assigned to me** appears in the
+drawer once the household holds two people. A sync answer that says `reset`,
+which happens when a list stops being shared, empties the cache and pulls
+again, so a list that was taken back leaves the phone.
+
 ## Limits
 
 - The app polls. It calls sync when a screen opens and on a pull-to-refresh. It
@@ -214,15 +236,25 @@ reason, and `filter/schema.go` holds the mapping.
   notifications.
 - The list carries no drag to reorder. The server holds an order key per task,
   and the phone reads it and never writes it. The browser cannot reorder either.
-- A comment, an attachment and a notification do not exist on the phone,
-  because they do not exist on the server either.
+- A comment does not exist on the phone. It is a row on the server since
+  2026-09-02, and `comment: words` therefore fails here with a sentence rather
+  than searching the description. It needs a Room entity, the rows in the sync
+  mapping, and a place in the detail sheet.
+- Shopping mode does not exist on the phone. It is a layout of a project view
+  in the browser, and the phone draws the list.
+- The phone cannot write an invitation and cannot share a list. Both are the
+  owner's jobs and both are in the browser.
+- An attachment exists nowhere in this build. A notification does not exist on
+  the phone alone: the transport is Web Push.
 - Cleartext HTTP is permitted, because a self-hosted server often runs on a
   private address with no certificate. Use HTTPS on any server that leaves your
   own network.
 - The app trusts a user certificate authority. That helps a private CA and it
   also widens the attack surface.
-- A schema change destroys the local database and pulls it again. Send the
-  outbox before an upgrade that changes the schema.
+- A schema change costs one full pull. It is a Room migration now and not a
+  destructive one, so the outbox survives an upgrade: it is the one table the
+  server cannot rebuild. The destructive fallback stays for a version nobody
+  wrote a step for, such as a downgrade.
 
 ## Known defects
 

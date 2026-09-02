@@ -59,7 +59,13 @@ func day(iso string) (time.Time, bool) {
 //
 //	{"title":"Book the ferry","due":"2026-09-01","time":"09:30",
 //	 "priority":1,"project":"Trip","labels":["call"],
-//	 "rrule":"","parsed":["next tuesday","09:30","p1","#Trip","@call"]}
+//	 "rrule":"","remind_at":"","remind_before":0,
+//	 "parsed":["next tuesday","09:30","p1","#Trip","@call"]}
+//
+// remind_at is a clock time on the due day, and remind_before is a count of
+// minutes before the due moment. A line sets one or neither. The phone holds
+// no reminder row yet, so it can show the field and cannot arm it: see
+// docs/BACKLOG.md.
 //
 // An empty string, an empty list or a zero priority means that the line said
 // nothing about that field.
@@ -70,15 +76,18 @@ func ParseQuickAdd(text, todayISO string) string {
 	}
 	r := quickadd.Parse(text, t)
 	out := struct {
-		Title    string   `json:"title"`
-		Due      string   `json:"due"`
-		Time     string   `json:"time"`
-		Priority int      `json:"priority"`
-		Project  string   `json:"project"`
-		Labels   []string `json:"labels"`
-		RRule    string   `json:"rrule"`
-		Parsed   []string `json:"parsed"`
-	}{r.Title, r.Due, r.Time, r.Priority, r.Project, r.Labels, r.RRule, r.Parsed}
+		Title        string   `json:"title"`
+		Due          string   `json:"due"`
+		Time         string   `json:"time"`
+		Priority     int      `json:"priority"`
+		Project      string   `json:"project"`
+		Labels       []string `json:"labels"`
+		RRule        string   `json:"rrule"`
+		RemindAt     string   `json:"remind_at"`
+		RemindBefore int      `json:"remind_before"`
+		Parsed       []string `json:"parsed"`
+	}{r.Title, r.Due, r.Time, r.Priority, r.Project, r.Labels, r.RRule,
+		r.RemindAt, r.RemindBefore, r.Parsed}
 	if out.Labels == nil {
 		out.Labels = []string{}
 	}
@@ -122,6 +131,19 @@ func CompileFilter(query, todayISO string) string {
 //	 "args":["2026-08-25"]}
 func CompileFilterRoom(query, todayISO string) string {
 	return compile(query, todayISO, filter.RoomSchema)
+}
+
+// CompileFilterRoomFor compiles a filter against the Android database for one
+// account.
+//
+// meID is the account that is asking, and `assigned to: me` is the term that
+// needs it. A phone that has not joined a household passes an empty string,
+// and the term then fails with a sentence rather than answering for the wrong
+// person.
+func CompileFilterRoomFor(query, todayISO, meID string) string {
+	schema := filter.RoomSchema
+	schema.Me = meID
+	return compile(query, todayISO, schema)
 }
 
 func compile(query, todayISO string, schema filter.Schema) string {
