@@ -797,7 +797,19 @@ function render() {
   shopBtn.textContent = S.layout === 'shop' ? 'List' : 'Shop';
   $('count').textContent = rows.length ? rows.length + (rows.length === 1 ? ' task' : ' tasks') : '';
   const pend = S.outbox.length;
-  $('status').textContent = S.online ? (pend ? pend + ' to send' : 'v' + S.version) : 'offline · ' + pend + ' queued';
+  const st = $('status');
+  st.textContent = S.online ? (pend ? pend + ' to send' : 'v' + S.version) : 'offline · ' + pend + ' queued';
+  // A local database that refuses a write is worth saying once. The screen and
+  // the outbox are still right, so the work is not lost while the tab is open,
+  // and a reload would lose whatever did not land.
+  if (cache.failures) {
+    st.textContent += ' · not saved here';
+    st.title = 'This browser refused to write the local copy. Your changes are '
+      + 'on screen and on their way to the server. Do not close the tab until '
+      + 'the count above reads a version.';
+  } else {
+    st.title = '';
+  }
 
   const list = $('list');
   if (boardOn()) {

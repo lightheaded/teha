@@ -238,7 +238,24 @@ export class Cache {
     const ops = this.take();
     if (!ops.length || !this.backend) return Promise.resolve();
     this.writing = this.backend.write(ops)
-      .catch((e) => { this.failures++; })
+      .catch((e) => {
+        this.failures++;
+        // Put back what did not land. The device record carries the outbox,
+        // which is the one thing the server cannot rebuild, so a batch that
+        // failed must not be dropped on the floor.
+        //
+        // A newer mark of the same row wins: it is what the app holds now.
+        // Nothing is scheduled here on purpose. The next edit flushes these
+        // with it, and a timer that retried a broken backend every 150
+        // milliseconds would spin for as long as the page is open.
+        for (const op of ops) {
+          const key = op.store === META ? 'key' : 'id';
+          const id = op.del !== undefined ? op.del : op.put[key];
+          if (!this.pending.has(op.store)) this.pending.set(op.store, new Map());
+          const rows = this.pending.get(op.store);
+          if (!rows.has(id)) rows.set(id, op.del !== undefined ? null : op.put);
+        }
+      })
       .then(() => {
         this.writing = null;
         if (this.again) { this.again = false; return this.flush(); }

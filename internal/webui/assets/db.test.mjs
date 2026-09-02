@@ -100,6 +100,58 @@ test('a backend that refuses a write is counted and never throws', async () => {
   assert.equal(c.failures, 1);
 });
 
+// A failed write must not throw the rows away. The device record carries the
+// outbox, and the outbox is the one thing the server cannot rebuild.
+test('a write that failed is tried again with the next one', async () => {
+  const back = fake();
+  let refuse = true;
+  const flaky = {
+    kind: 'indexeddb',
+    readAll: back.readAll,
+    write: async (ops) => {
+      if (refuse) throw new Error('no room');
+      return back.write(ops);
+    },
+  };
+  const c = new Cache(flaky, { delay: 0 });
+  c.mark('tasks', 't1', { id: 't1', title: 'Milk' });
+  c.markMeta({ version: 4, outbox: [{ uuid: 'u1', type: 'task_add' }] });
+  await c.flushNow();
+  assert.equal(c.failures, 1);
+
+  // The next write carries the batch that failed as well.
+  refuse = false;
+  c.mark('tasks', 't2', { id: 't2', title: 'Bread' });
+  await c.flushNow();
+
+  const held = await c.read();
+  assert.equal(held.rows.tasks.length, 2, 'the row from the failed batch is back');
+  assert.equal(held.meta.outbox.length, 1, 'the outbox survived the failure');
+});
+
+// What the app holds now wins over what a failed write was carrying.
+test('a newer mark is not overwritten by a failed batch', async () => {
+  const back = fake();
+  let refuse = true;
+  const flaky = {
+    kind: 'indexeddb',
+    readAll: back.readAll,
+    write: async (ops) => {
+      if (refuse) throw new Error('no room');
+      return back.write(ops);
+    },
+  };
+  const c = new Cache(flaky, { delay: 0 });
+  c.mark('tasks', 't1', { id: 't1', title: 'Old' });
+  await c.flushNow();
+
+  refuse = false;
+  c.mark('tasks', 't1', { id: 't1', title: 'New' });
+  await c.flushNow();
+  const held = await c.read();
+  assert.equal(held.rows.tasks[0].title, 'New');
+});
+
 test('two flushes at once lose no operation', async () => {
   const back = fake();
   const c = new Cache(back, { delay: 0 });

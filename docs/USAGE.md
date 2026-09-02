@@ -539,6 +539,10 @@ is what a private window does, falls back to one `localStorage` string.
 A browser that used an older build moves to the new database once, at the next
 start. Nothing is lost, the outbox included, and the old key is removed.
 
+A write that the browser refuses is kept and tried again with the next one, and
+the status line then reads **not saved here**. The screen and the outbox are
+still right, so nothing is lost while the tab is open.
+
 Every edit lands in the local state and in an outbox. The screen updates first.
 The outbox drains to `POST /v1/sync` when the network allows it. A retry runs
 every two seconds while the outbox holds commands. A command carries a uuid, so
