@@ -645,9 +645,13 @@ class TehaRepository(context: Context) {
      * join redeems an invitation code and makes this phone a second account.
      *
      * The code is the credential: this is the one call that carries no device
-     * token, and the answer carries the token that every later call does. The
-     * cache is dropped before the token changes, because what it holds belongs
-     * to whoever the phone was before.
+     * token, and the answer carries the token that every later call does.
+     *
+     * The cache goes, because what it holds belongs to whoever the phone was
+     * before. The outbox goes with it, and it is the only place in this class
+     * that drops it: a command written by the old account would land in the
+     * new account's inbox, which is worse than losing it. A phone that is
+     * joining is a phone with nothing owed.
      */
     suspend fun join(code: String, name: String): SyncResult {
         if (!settings.isConfigured) {

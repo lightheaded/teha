@@ -218,7 +218,9 @@ The phone joins a household since 2026-09-02.
    code under **The household** and touch **Join the household**.
 3. The server answers with a device token of your own, and the app keeps it in
    the encrypted store. The local cache is dropped first, because what it holds
-   belongs to whoever the phone was before. The outbox is not dropped.
+   belongs to whoever the phone was before, and an unsent command goes with it:
+   a capture written by the old account would land in the new account's inbox.
+   Send what is queued before you join.
 
 After that the phone is that account: its own inbox, its own reminders, and
 only the lists somebody shared with it. **Settings** names everybody in the
@@ -255,6 +257,10 @@ again, so a list that was taken back leaves the phone.
   destructive one, so the outbox survives an upgrade: it is the one table the
   server cannot rebuild. The destructive fallback stays for a version nobody
   wrote a step for, such as a downgrade.
+- Nothing tests the migration itself. Room compares the migrated file with what
+  it generates for the entities on every open, so a statement that disagrees is
+  an exception at the first start after an upgrade. `docs/BACKLOG.md` says what
+  the real test needs and why it cannot be written now.
 
 ## Known defects
 

@@ -305,6 +305,26 @@ the sync payload and one capability flag in `filter.js`.
 
 ---
 
+## Nothing tests the Room migration
+
+*Added 2026-09-02 with the household on the phone.*
+
+Database version 2 adds `sectionId` and `assigneeId` to `tasks`, and the
+`sections` and `accounts` tables. `TehaDatabase.MIGRATION_1_2` writes that by
+hand, and Room compares the result with what it generates for the entities
+every time it opens the file. A statement that disagrees is an exception at the
+first open after the upgrade, for every person who already has the app.
+
+The right test is `MigrationTestHelper`, which needs `exportSchema = true`, the
+schema JSON of version 1 and version 2 in the repository, and a run on an
+emulator. Version 1 was built with `exportSchema = false`, so its JSON does not
+exist and cannot be written now without building the old code.
+
+What guards it today: the types are the three Room writes for `String`,
+`String?` and `Long`, the column order follows the data class, and the emulator
+corpus job opens a database built from the entities. What is not guarded is the
+upgrade of a file that a person already has.
+
 ## The phone refuses `comment:`
 
 *Added 2026-09-02 with the comment table. The section term closed on the same

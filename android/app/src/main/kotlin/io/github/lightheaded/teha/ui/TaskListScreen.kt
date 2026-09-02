@@ -82,6 +82,9 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
     val labels by vm.labels.collectAsStateWithLifecycle()
     val sections by vm.sections.collectAsStateWithLifecycle()
     val people by vm.people.collectAsStateWithLifecycle()
+    // Read once per household change, not once per row per frame: the account
+    // id lives in the encrypted preference file, and that is a keystore read.
+    val me = remember(people) { vm.me() }
     val marked by vm.marked.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val selecting = marked.isNotEmpty()
@@ -249,7 +252,7 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
                                 TaskRow(
                                     task = task,
                                     project = projects.firstOrNull { it.id == task.projectId },
-                                    who = assigneeName(task, people, vm.me()),
+                                    who = assigneeName(task, people, me),
                                     today = today,
                                     selected = task.id in marked,
                                     selecting = selecting,
@@ -278,7 +281,7 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
             projects = projects,
             sections = sections,
             people = people,
-            me = vm.me(),
+            me = me,
             knownLabels = labels.map { it.name },
             today = today,
             onEdit = vm::edit,
