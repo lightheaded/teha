@@ -320,10 +320,27 @@ schema JSON of version 1 and version 2 in the repository, and a run on an
 emulator. Version 1 was built with `exportSchema = false`, so its JSON does not
 exist and cannot be written now without building the old code.
 
-What guards it today: the types are the three Room writes for `String`,
-`String?` and `Long`, the column order follows the data class, and the emulator
-corpus job opens a database built from the entities. What is not guarded is the
-upgrade of a file that a person already has.
+What guards it today, and it is more than it sounds. Room writes its own
+`CREATE TABLE` statements into the compiled application, so the two can be
+compared. Take the debug APK from the android workflow artifact and read the
+strings out of it:
+
+```sh
+gh run download <run id> -n android-build -D /tmp/apk
+cd /tmp && unzip -o /tmp/apk/build/outputs/apk/debug/app-debug.apk 'classes*.dex'
+for f in classes*.dex; do strings -a "$f" |
+  grep -o 'CREATE TABLE IF NOT EXISTS `\(sections\|accounts\|tasks\)`[^"]*'; done | sort -u
+```
+
+On 2026-09-02 that printed the `sections` and `accounts` statements character
+for character as `MIGRATION_1_2` writes them, and it printed `tasks` with
+`sectionId` and `assigneeId` as nullable `TEXT`, which is what the two ALTER
+statements add. The emulator corpus job also opens a database built from the
+entities.
+
+What is still not guarded is the upgrade itself, running against a file that a
+person already has. Do the comparison above after any later change to the
+entities, until the schema JSON exists.
 
 ## The phone refuses `comment:`
 

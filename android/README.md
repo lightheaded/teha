@@ -259,8 +259,9 @@ again, so a list that was taken back leaves the phone.
   wrote a step for, such as a downgrade.
 - Nothing tests the migration itself. Room compares the migrated file with what
   it generates for the entities on every open, so a statement that disagrees is
-  an exception at the first start after an upgrade. `docs/BACKLOG.md` says what
-  the real test needs and why it cannot be written now.
+  an exception at the first start after an upgrade. The statements of version 2
+  were read out of the compiled APK on 2026-09-02 and they match character for
+  character: `docs/BACKLOG.md` holds the command and what the real test needs.
 
 ## Known defects
 
