@@ -54,6 +54,32 @@ interface TaskDao {
     @RawQuery(observedEntities = [TaskEntity::class])
     fun filtered(query: SupportSQLiteQuery): Flow<List<TaskEntity>>
 
+    /**
+     * inProject reads every task of one list, open and done alike.
+     *
+     * Shopping mode needs both: the open items are the list, and the done ones
+     * are the basket and the suggestions. Every other view reads through the
+     * compiled filter, and no filter term means "including what is finished".
+     */
+    @Query(
+        """
+        SELECT * FROM tasks
+        WHERE deletedAt IS NULL AND projectId = :projectId AND parentId IS NULL
+        ORDER BY orderKey ASC, title ASC
+        """
+    )
+    fun inProject(projectId: String): Flow<List<TaskEntity>>
+
+    // The items of one list that carry a heading. addItem reads it to learn
+    // which aisle an item belongs in, from what the household bought before.
+    @Query(
+        """
+        SELECT * FROM tasks
+        WHERE deletedAt IS NULL AND projectId = :projectId AND sectionId IS NOT NULL
+        """
+    )
+    suspend fun filedInProject(projectId: String): List<TaskEntity>
+
     // Used when the server refuses a task_add. The row exists nowhere else, so
     // no later pull can remove it.
     @Query("DELETE FROM tasks WHERE id = :id")
@@ -108,6 +134,46 @@ interface AccountDao {
     // replaces the table rather than merging into it: a person who left must
     // not stay in the list.
     @Query("DELETE FROM accounts")
+    suspend fun clear()
+}
+
+@Dao
+interface CommentDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(comments: List<CommentEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertOne(comment: CommentEntity)
+
+    // The detail screen watches the talk on one task, so a line the other
+    // person writes appears under the open sheet after the next sync.
+    @Query(
+        """
+        SELECT * FROM comments
+        WHERE taskId = :taskId AND deletedAt IS NULL
+        ORDER BY createdAt ASC, id ASC
+        """
+    )
+    fun forTask(taskId: String): Flow<List<CommentEntity>>
+
+    @Query("SELECT * FROM comments WHERE id = :id")
+    suspend fun byId(id: String): CommentEntity?
+
+    // Every line this phone has not seen, newest last. The notifier reads it
+    // after a pull to find what somebody else said. See TehaRepository.
+    @Query(
+        """
+        SELECT * FROM comments
+        WHERE deletedAt IS NULL AND accountId != :me AND createdAt > :after
+        ORDER BY createdAt ASC
+        """
+    )
+    suspend fun since(me: String, after: String): List<CommentEntity>
+
+    @Query("DELETE FROM comments WHERE id = :id")
+    suspend fun deleteById(id: String)
+
+    @Query("DELETE FROM comments")
     suspend fun clear()
 }
 

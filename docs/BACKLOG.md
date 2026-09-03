@@ -70,9 +70,11 @@ the household: see [DECISIONS.md](DECISIONS.md) D-016 and D-017.*
   household, reads `reset`, assigns a task and files one under a heading since
   2026-09-02. Writing an invitation and sharing a list are the owner's jobs and
   they are in the browser only.
-- **The phone has no comments and no shopping layout.** `comment:` fails there
-  with a sentence, because Room keeps no comment table. Shopping mode is a
-  layout, and the phone draws the list.
+- **Closed 2026-09-03: the phone has comments and the shopping layout.** Both
+  run there now. What the phone still has less of is the notification: it has
+  no push transport, so a nudge is found by comparing a pull with what the
+  database held, and the latency is the sync interval and not a second. See
+  "The phone hears late" below.
 - **A task can be assigned to somebody who then loses the list.** Nothing
   clears the assignee when a share is taken back. The name simply stops
   resolving, and the row shows "someone". A new assignment to somebody out of
@@ -342,24 +344,60 @@ for character as `MIGRATION_1_2` writes them, and it printed `tasks` with
 statements add. The emulator corpus job also opens a database built from the
 entities.
 
-What is still not guarded is the upgrade itself, running against a file that a
-person already has. Do the comparison above after any later change to the
-entities, until the schema JSON exists.
+**Closed for version 3 on 2026-09-03.** `MigrationTest.kt` runs the upgrade on
+a device. It builds the old version out of the new one: Room creates the file,
+the test drops exactly what version 3 added and writes `PRAGMA user_version =
+2`, and opening it again runs `MIGRATION_2_3` and lets Room compare the result
+with the entities. A statement that disagrees by one character fails there. The
+test carries an outbox row through the upgrade as well, which is the reason a
+migration exists rather than the destructive fallback.
 
-## The phone refuses `comment:`
+`exportSchema` is now on, so `app/schemas` holds the JSON from version 3 on. A
+later migration can therefore use `MigrationTestHelper`, which reads it. The
+build writes the file: commit it with the migration that produced it.
 
-*Added 2026-09-02 with the comment table. The section term closed on the same
-day: Room holds `sections`, `accounts`, `sectionId` and `assigneeId` since the
-phone joined the household, so `/Winter`, `no section`, `assigned` and
-`assigned to: me` all answer there now.*
+**Still open: version 1 to version 2.** Its JSON does not exist and the trick
+above cannot make version 1, because SQLite cannot drop a column on every
+Android release this app supports. The APK comparison above is what guards it,
+and it passed on 2026-09-02.
 
-Room holds no comment table, so `filter.RoomSchema` leaves the name empty and
-`comment: words` fails on the phone with a sentence. The failure is deliberate.
-The term read the description while a comment lived there, and that answer is
-close and wrong now that a comment is a row: see D-020.
+## Closed: the phone refuses `comment:`
 
-Closing it needs a `comment` entity in Room, the comment rows in the sync
-mapping, and a place in the detail sheet to read and write one.
+*Opened 2026-09-02 with the comment table, closed 2026-09-03.* Room holds a
+`comments` table since database version 3, `filter.RoomSchema` names it, and
+the detail sheet reads and writes a line. `comment:` and `note:` answer on the
+phone with the Room column names, and an instrumented test proves it against a
+real Room database.
+
+## The phone hears late
+
+*Added 2026-09-03 with the background sync.*
+
+The browser has Web Push, so a comment reaches it in about a second. The phone
+has no push transport at all. A nudge is found by comparing what a pull brought
+with what the Room database already held, so it arrives when a sync runs.
+
+`SyncWorker` runs every fifteen minutes, which is the shortest period Android
+accepts, and the system moves it later to suit the battery. A capture from the
+tile asks for one sync as soon as the system allows. So the honest number is
+"within about a quarter of an hour", not "at once".
+
+The answer the plan names is UnifiedPush through ntfy: the phone registers an
+endpoint, the server posts to it, and `internal/store.Event` already carries
+everything the sender needs, so no store change is involved. It waits until the
+delay is felt in a real shop.
+
+Two smaller limits go with it:
+
+- **A nudge about an assignment names the wrong person in a household of
+  three.** The delta says a task is now assigned to you and never says who
+  wrote that, so the name is the one other person when there is exactly one,
+  and an empty string otherwise. It then reads "Someone gave this to you". The
+  server knows the answer, and telling the client costs a field.
+- **A nudge is lost if two syncs race.** The pull that sees the row first says
+  it. The app and the worker share the sync lock, so they cannot both see it,
+  which is the intent; but a pull that lands while the process is being killed
+  writes the rows and says nothing.
 
 ## The phone refuses `created:`
 

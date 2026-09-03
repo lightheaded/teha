@@ -88,4 +88,3 @@ func TestALoginIsInTheLog(t *testing.T) {
 		t.Fatalf("a failed login must say where it came from: %s", body)
 	}
 }
-

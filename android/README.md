@@ -107,6 +107,7 @@ the task has:
 | Repeat | Four presets and a raw RRULE field. The shared Go engine judges the rule. |
 | Starts, Deadline | The same day menu as Due. |
 | Sub-tasks | A checkbox each, and a field to add one. A finished child stays, struck through. |
+| Comments | The talk on the task. Tap your own line to edit it, and the X beside it to remove it. A line of somebody else's carries neither, because the server refuses both. |
 
 The sheet reads the row from the database, so a sync that lands while it is open
 redraws it. Every change goes to the local row and the outbox at once. One sync
@@ -128,6 +129,54 @@ and the snackbar offers **Undo**.
 While a set is picked the checkbox shows membership, not completion. Two
 meanings for one control in one moment is how a person completes a task they
 meant to select.
+
+## Shop from the phone
+
+Open a project view and touch the trolley in the top bar. It appears on a
+project view only, because an aisle belongs to one list.
+
+- The items group under the headings of that project. An empty heading is not
+  drawn.
+- `2x milk` draws the count as a chip, and the words beside it. The `x` is
+  required, so "20 minutes of stretching" stays a task.
+- The whole row is 64 density pixels tall and ticks the item. The name opens
+  the task, so a note and a comment are still one tap away.
+- **Bought before** offers what the household buys and has not got on the list
+  now. One chip per name, newest first.
+- A new item goes into the aisle where an item of that name went last time.
+  Nothing is learned beyond that: file it somewhere else and the next one
+  follows.
+- A ticked item stays on the screen in the basket, so a wrong tap costs one tap
+  back. **Clear** empties it, and the basket forgets a trip after twelve hours
+  anyway.
+
+Back leaves the mode, and so does picking another view.
+
+## Share text into the app
+
+Share from any app and pick **Add to teha**. The capture window opens with the
+line already in the field, so a date, a project or a label can still be typed
+before it is sent. A shared web page arrives as its title and its address
+together, which is a task a person recognises a week later.
+
+Nothing is written until you send it, so a share that lands in the wrong app
+costs nothing.
+
+## Sync and notifications in the background
+
+The app syncs on its own every fifteen minutes, and as soon as the system
+allows after a capture from the tile. That is what makes an offline capture
+reach the server without anybody opening the app.
+
+A task somebody gives you, and a comment somebody writes, arrive as a
+notification. Android 13 and later ask for the permission the first time the
+list opens; the app works with it refused, and the only thing lost is being
+told before you look.
+
+**It is not push.** The nudge is what a pull brought that the database did not
+hold, so it arrives with the sync and is late by up to that interval. The
+browser has Web Push and hears in about a second.
+`../docs/BACKLOG.md` records what closing that gap needs.
 
 ## Build
 
@@ -233,21 +282,20 @@ again, so a list that was taken back leaves the phone.
 
 ## Limits
 
-- The app polls. It calls sync when a screen opens and on a pull-to-refresh. It
-  does not read `GET /v1/events`, and it has no background sync and no
-  notifications.
+- The app polls. It calls sync when a screen opens, on a pull-to-refresh, and
+  on a background schedule of fifteen minutes. It does not read `GET
+  /v1/events`, so a change made in the browser reaches the phone on that
+  schedule and not at once.
 - The list carries no drag to reorder. The server holds an order key per task,
   and the phone reads it and never writes it. The browser cannot reorder either.
-- A comment does not exist on the phone. It is a row on the server since
-  2026-09-02, and `comment: words` therefore fails here with a sentence rather
-  than searching the description. It needs a Room entity, the rows in the sync
-  mapping, and a place in the detail sheet.
-- Shopping mode does not exist on the phone. It is a layout of a project view
-  in the browser, and the phone draws the list.
+- A notification is not a push. It is found by comparing a pull with what the
+  database held, so it is late by up to the sync interval.
+- A notification about an assignment names the other person only in a household
+  of two. The delta says a task is now yours and never says who wrote that, so
+  a bigger household reads "Someone gave this to you".
 - The phone cannot write an invitation and cannot share a list. Both are the
   owner's jobs and both are in the browser.
-- An attachment exists nowhere in this build. A notification does not exist on
-  the phone alone: the transport is Web Push.
+- An attachment exists nowhere in this build.
 - Cleartext HTTP is permitted, because a self-hosted server often runs on a
   private address with no certificate. Use HTTPS on any server that leaves your
   own network.
@@ -257,21 +305,23 @@ again, so a list that was taken back leaves the phone.
   destructive one, so the outbox survives an upgrade: it is the one table the
   server cannot rebuild. The destructive fallback stays for a version nobody
   wrote a step for, such as a downgrade.
-- Nothing tests the migration itself. Room compares the migrated file with what
-  it generates for the entities on every open, so a statement that disagrees is
-  an exception at the first start after an upgrade. The statements of version 2
-  were read out of the compiled APK on 2026-09-02 and they match character for
-  character: `docs/BACKLOG.md` holds the command and what the real test needs.
+- The migration from version 2 to version 3 has a test that runs on a device.
+  `MigrationTest.kt` builds the old version out of the new one, runs the
+  upgrade, and lets Room compare the result with the entities. It carries an
+  outbox row through as well. The migration from version 1 to version 2 still
+  has none, because its schema was never exported: the statements were read out
+  of the compiled APK on 2026-09-02 and they match character for character.
+  `../docs/BACKLOG.md` holds the command.
 
 ## Known defects
 
 A review on 2026-08-26 read every source against the Go server contract. It
-found nine defects. Seven are fixed. These four are open, and none of them loses
-data.
+found nine defects. Eight are fixed. These three are open, and none of them
+loses data.
 
 | # | Defect | Effect |
 |---|---|---|
-| 1 | A capture from the tile starts a sync that `finish()` then cancels | The capture waits for the next app launch. The uuid dedupe covers the resend, so nothing is lost. The fix needs an application-scoped coroutine. |
+| ~~1~~ | ~~A capture from the tile starts a sync that `finish()` then cancels~~ | **Closed 2026-09-03.** The window now asks `SyncWorker` for one sync as it closes, so the capture leaves the phone with nothing open to carry it. |
 | 2 | The encrypted preference file and the database open on the main thread | Keystore work and file input happen before the first frame. StrictMode reports it, and a slow device can show an ANR. |
 | 3 | A label whose name holds a comma splits into two labels on the phone | Display, and a filter. `%first` finds a task whose label is `first, second`. The quick add parser cannot make such a name, but the MCP server and the importer can. No client can name it in a filter, because a comma is the OR operator. |
 | 4 | A 401 shows the same message as a network failure | Nothing points the user at the settings screen to fix the token. |

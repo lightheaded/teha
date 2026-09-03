@@ -8,8 +8,10 @@ import androidx.lifecycle.viewModelScope
 import io.github.lightheaded.teha.TehaApp
 import io.github.lightheaded.teha.data.DueChange
 import io.github.lightheaded.teha.data.Edit
+import io.github.lightheaded.teha.data.Notifier
 import io.github.lightheaded.teha.data.SyncResult
 import io.github.lightheaded.teha.data.db.AccountEntity
+import io.github.lightheaded.teha.data.db.CommentEntity
 import io.github.lightheaded.teha.data.db.LabelEntity
 import io.github.lightheaded.teha.data.db.ProjectEntity
 import io.github.lightheaded.teha.data.db.SectionEntity
@@ -87,6 +89,10 @@ data class UiState(
     // person typed. The compiler names the position that failed, so the text
     // goes to the field unchanged.
     val filterError: String? = null,
+    // shopping is the layout of a project view. It is not saved: a person who
+    // opens the app is not in the shop, and the browser saves it because a
+    // desktop keeps one list open for a week.
+    val shopping: Boolean = false,
     // undoLabel is set when the message on screen can be taken back. The
     // snackbar shows it as an action, and a null label means no action.
     val undoLabel: String? = null,
@@ -177,6 +183,11 @@ class TehaViewModel(app: Application) : AndroidViewModel(app) {
         .flatMapLatest { id -> if (id == null) flowOf(emptyList()) else repo.subtasks(id) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val detailComments: StateFlow<List<CommentEntity>> = openTaskId
+        .flatMapLatest { id -> if (id == null) flowOf(emptyList()) else repo.comments(id) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     fun openDetail(task: TaskEntity) {
         openTaskId.value = task.id
     }
@@ -208,6 +219,35 @@ class TehaViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { repo.addSubtask(parent, title) }
     }
 
+    // --- the talk on a task --------------------------------------------------
+    //
+    // Each of these syncs at once, and edit() above does not. A comment is a
+    // message to the other person, and a message that waits for the sheet to
+    // close is a message that arrives late. A field of a task is not read by
+    // anybody until they open the task.
+
+    fun addComment(body: String) {
+        val id = openTaskId.value ?: return
+        viewModelScope.launch {
+            repo.comment(id, body)
+            sync()
+        }
+    }
+
+    fun editComment(id: String, body: String) {
+        viewModelScope.launch {
+            repo.editComment(id, body)
+            sync()
+        }
+    }
+
+    fun deleteComment(id: String) {
+        viewModelScope.launch {
+            repo.deleteComment(id)
+            sync()
+        }
+    }
+
     /** deleteOpenTask hides the task and offers one chance to take it back. */
     fun deleteOpenTask() {
         val task = detail.value ?: return
@@ -227,7 +267,63 @@ class TehaViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setView(v: TaskView) {
-        _state.value = _state.value.copy(view = v, filterError = null)
+        // Leaving a project leaves shopping mode. The layout belongs to one
+        // list, and carrying it into Today would draw aisles that mean
+        // nothing.
+        _state.value = _state.value.copy(view = v, filterError = null, shopping = false)
+    }
+
+    // --- shopping mode -------------------------------------------------------
+    //
+    // A layout of one project, not a kind of data. See DECISIONS.md D-021 and
+    // ShoppingScreen.kt.
+
+    /**
+     * shopProjectId is the list on screen, or null when the view is not a
+     * project view.
+     *
+     * The view carries the query a person can also type, so the project is
+     * found by the name in it. That is the same rule the browser uses.
+     */
+    val shopProjectId: StateFlow<String?> =
+        combine(_state, repo.projects) { st, ps ->
+            ps.firstOrNull { "#${it.name}" == st.view.query }?.id
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val shopItems: StateFlow<List<TaskEntity>> = shopProjectId
+        .flatMapLatest { id -> if (id == null) flowOf(emptyList()) else repo.projectTasks(id) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** basketCleared is when this device last emptied the basket of this list. */
+    private val _basketCleared = MutableStateFlow("")
+    val basketCleared: StateFlow<String> = _basketCleared.asStateFlow()
+
+    fun toggleShopping() {
+        val id = shopProjectId.value
+        if (id == null) {
+            _state.value = _state.value.copy(
+                message = "Shopping mode needs a project. Pick a list in the drawer.",
+            )
+            return
+        }
+        _basketCleared.value = repo.settings.shopClear(id)
+        _state.value = _state.value.copy(shopping = !_state.value.shopping)
+    }
+
+    fun addItem(text: String) {
+        val id = shopProjectId.value ?: return
+        viewModelScope.launch {
+            repo.addItem(id, text)
+            sync()
+        }
+    }
+
+    fun clearBasket() {
+        val id = shopProjectId.value ?: return
+        val now = java.time.Instant.now().toString()
+        repo.settings.setShopClear(id, now)
+        _basketCleared.value = now
     }
 
     /**
@@ -469,6 +565,13 @@ class TehaViewModel(app: Application) : AndroidViewModel(app) {
             if (announce) {
                 val elapsed = System.currentTimeMillis() - startedAt
                 if (elapsed < MIN_SPINNER_MS) delay(MIN_SPINNER_MS - elapsed)
+            }
+            // A nudge is posted from here as well as from SyncWorker.
+            // Whichever sync sees the row first says it, and the other finds
+            // nothing new, so nothing is said twice. Without this, a phone
+            // with the app open in another view would hear nothing at all.
+            if (result is SyncResult.Ok) {
+                Notifier.show(getApplication<Application>(), result.nudges)
             }
             _state.value = when (result) {
                 is SyncResult.Ok ->

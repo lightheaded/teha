@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
@@ -36,6 +37,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
@@ -79,9 +81,13 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
     val overdue by vm.overdue.collectAsStateWithLifecycle()
     val detail by vm.detail.collectAsStateWithLifecycle()
     val subtasks by vm.detailSubtasks.collectAsStateWithLifecycle()
+    val talk by vm.detailComments.collectAsStateWithLifecycle()
     val labels by vm.labels.collectAsStateWithLifecycle()
     val sections by vm.sections.collectAsStateWithLifecycle()
     val people by vm.people.collectAsStateWithLifecycle()
+    val shopProject by vm.shopProjectId.collectAsStateWithLifecycle()
+    val shopItems by vm.shopItems.collectAsStateWithLifecycle()
+    val basketCleared by vm.basketCleared.collectAsStateWithLifecycle()
     // Read once per household change, not once per row per frame: the account
     // id lives in the encrypted preference file, and that is a keystore read.
     val me = remember(people) { vm.me() }
@@ -98,6 +104,9 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
     // Back closes the drawer for the same reason. ModalNavigationDrawer does
     // not take the key itself.
     BackHandler(enabled = drawer.isOpen && !selecting) { scope.launch { drawer.close() } }
+    // Back leaves shopping mode before it leaves the screen, for the same
+    // reason: a person reaches for back to escape a mode.
+    BackHandler(enabled = state.shopping && !selecting && !drawer.isOpen) { vm.toggleShopping() }
 
     LaunchedEffect(state.message) {
         val message = state.message ?: return@LaunchedEffect
@@ -172,6 +181,24 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
                     },
                     actions = {
                         if (!selecting) {
+                            // The shop button only appears on a project view,
+                            // because an aisle belongs to one list. The
+                            // browser hides the same button for the same
+                            // reason.
+                            if (shopProject != null) {
+                                IconButton(onClick = vm::toggleShopping) {
+                                    Icon(
+                                        Icons.Filled.ShoppingCart,
+                                        contentDescription =
+                                        if (state.shopping) "Back to the list" else "Shopping mode",
+                                        tint = if (state.shopping) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            LocalContentColor.current
+                                        },
+                                    )
+                                }
+                            }
                             IconButton(onClick = onOpenSettings) {
                                 Icon(Icons.Filled.Settings, contentDescription = "Settings")
                             }
@@ -225,7 +252,17 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
                     onRefresh = { vm.sync(announce = true) },
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    if (tasks.isEmpty()) {
+                    if (state.shopping && shopProject != null) {
+                        ShoppingScreen(
+                            items = shopItems,
+                            sections = sections.filter { it.projectId == shopProject },
+                            cleared = basketCleared,
+                            onToggle = vm::toggle,
+                            onOpen = vm::openDetail,
+                            onAdd = vm::addItem,
+                            onClearBasket = vm::clearBasket,
+                        )
+                    } else if (tasks.isEmpty()) {
                         // A LazyColumn, not a Box, even for one line of text.
                         // PullToRefreshBox reads the pull through nested scroll, and
                         // only a scrollable child sends those events. With a plain
@@ -282,11 +319,15 @@ fun TaskListScreen(vm: TehaViewModel, onOpenSettings: () -> Unit) {
             sections = sections,
             people = people,
             me = me,
+            comments = talk,
             knownLabels = labels.map { it.name },
             today = today,
             onEdit = vm::edit,
             onToggleTask = vm::toggle,
             onAddSubtask = vm::addSubtask,
+            onComment = vm::addComment,
+            onEditComment = vm::editComment,
+            onDeleteComment = vm::deleteComment,
             onDelete = vm::deleteOpenTask,
             onClose = vm::onLeave,
         )

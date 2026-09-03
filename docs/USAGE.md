@@ -1430,8 +1430,8 @@ Nothing else uses them.
 **`created:` fails in the browser,** because the sync payload carries no
 creation date. Every other term of the grammar answers the same everywhere.
 
-Next, in order: an hour grid on the week calendar, attachments, and the phone
-reaching what the browser reaches. [BACKLOG.md](BACKLOG.md) holds every
+Next, in order: the exit tests, attachments, an hour grid on the week calendar,
+and an order key that a client writes. [BACKLOG.md](BACKLOG.md) holds every
 knowingly unfinished thing with its reason.
 
 The real Todoist import already ran, on 2026-08-25: 17 projects, 250 tasks, 63

@@ -16,13 +16,17 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -62,6 +66,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import io.github.lightheaded.teha.data.Edit
 import io.github.lightheaded.teha.data.db.AccountEntity
+import io.github.lightheaded.teha.data.db.CommentEntity
 import io.github.lightheaded.teha.data.db.ProjectEntity
 import io.github.lightheaded.teha.data.db.SectionEntity
 import io.github.lightheaded.teha.data.db.TaskEntity
@@ -96,11 +101,18 @@ fun TaskDetailSheet(
     // draws no assignee chip: a field that always says "me" is in the way.
     people: List<AccountEntity>,
     me: String,
+    // The talk on this task, oldest first. It is a conversation between two
+    // people, so a list of one person still draws it: a note to yourself on a
+    // task is what the browser has always allowed.
+    comments: List<CommentEntity>,
     knownLabels: List<String>,
     today: String,
     onEdit: (Edit) -> Unit,
     onToggleTask: (TaskEntity) -> Unit,
     onAddSubtask: (String) -> Unit,
+    onComment: (String) -> Unit,
+    onEditComment: (String, String) -> Unit,
+    onDeleteComment: (String) -> Unit,
     onDelete: () -> Unit,
     onClose: () -> Unit,
 ) {
@@ -160,6 +172,8 @@ fun TaskDetailSheet(
 
             HorizontalDivider()
             Subtasks(subtasks, onToggleTask, onAddSubtask)
+            HorizontalDivider()
+            Talk(comments, people, me, onComment, onEditComment, onDeleteComment)
             HorizontalDivider()
 
             Row(
@@ -647,6 +661,152 @@ private fun Subtasks(
                 Icon(Icons.Filled.Add, contentDescription = "Add the sub-task")
             }
         }
+    }
+}
+
+/**
+ * Talk is the conversation on one task.
+ *
+ * The author is the only person who may change or remove a line, and the
+ * server enforces it, so a line of somebody else's carries no controls at all.
+ * A refusal a person can see coming is better than one they read afterwards.
+ *
+ * A tap on your own line opens it for editing, which is how the browser panel
+ * works as well.
+ */
+@Composable
+private fun Talk(
+    comments: List<CommentEntity>,
+    people: List<AccountEntity>,
+    me: String,
+    onAdd: (String) -> Unit,
+    onEdit: (String, String) -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    var fresh by remember { mutableStateOf("") }
+    var editing by remember { mutableStateOf<String?>(null) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            if (comments.isEmpty()) "Comments" else "Comments  ${comments.size}",
+            style = MaterialTheme.typography.labelLarge,
+        )
+        comments.forEach { line ->
+            val mine = line.accountId == me
+            if (editing == line.id) {
+                CommentEditor(
+                    start = line.body,
+                    onDone = { text ->
+                        editing = null
+                        if (text.isNotBlank() && text.trim() != line.body) onEdit(line.id, text)
+                    },
+                )
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(
+                            if (mine) Modifier.clickable { editing = line.id } else Modifier
+                        )
+                        .padding(vertical = 2.dp),
+                    verticalArrangement = Arrangement.spacedBy(1.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (mine) "me" else personName(line.accountId, people),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            "  ${howLongAgo(line.createdAt)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (mine) {
+                            Spacer(Modifier.weight(1f))
+                            IconButton(onClick = { onDelete(line.id) }) {
+                                Icon(
+                                    Icons.Filled.Close,
+                                    contentDescription = "Delete this comment",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                    Text(line.body, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = fresh,
+                onValueChange = { fresh = it },
+                placeholder = { Text("Say something") },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = {
+                    if (fresh.isNotBlank()) { onAdd(fresh); fresh = "" }
+                }),
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 56.dp),
+            )
+            IconButton(
+                onClick = { if (fresh.isNotBlank()) { onAdd(fresh); fresh = "" } },
+                enabled = fresh.isNotBlank(),
+            ) {
+                Icon(Icons.Filled.Send, contentDescription = "Send the comment")
+            }
+        }
+    }
+}
+
+/**
+ * CommentEditor edits one line in place.
+ *
+ * It keeps its own copy of the text and writes it when the field loses focus
+ * or the keyboard says Done, exactly as the title field does. A field that
+ * follows the database moves the cursor under the user's finger on every sync.
+ */
+@Composable
+private fun CommentEditor(start: String, onDone: (String) -> Unit) {
+    var text by remember { mutableStateOf(start) }
+    OutlinedTextField(
+        value = text,
+        onValueChange = { text = it },
+        label = { Text("Your comment") },
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { onDone(text) }),
+        trailingIcon = {
+            IconButton(onClick = { onDone(text) }) {
+                Icon(Icons.Filled.Check, contentDescription = "Save the comment")
+            }
+        },
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+/** personName says who somebody is, in one word. */
+private fun personName(accountId: String, people: List<AccountEntity>): String =
+    people.firstOrNull { it.id == accountId }?.name ?: "someone"
+
+/**
+ * howLongAgo says the age of a line in the fewest words.
+ *
+ * A conversation about a chore is about "an hour ago", never about a
+ * timestamp. An unreadable stamp gives an empty string rather than a crash: an
+ * import writes whatever Todoist held.
+ */
+private fun howLongAgo(stamp: String): String {
+    val then = runCatching { Instant.parse(stamp) }.getOrNull() ?: return ""
+    val mins = (Instant.now().epochSecond - then.epochSecond) / 60
+    return when {
+        mins < 1L -> "now"
+        mins < 60L -> "${mins}m ago"
+        mins < 60L * 24 -> "${mins / 60}h ago"
+        mins < 60L * 24 * 7 -> "${mins / (60 * 24)}d ago"
+        // ofInstant needs API 33 and this app runs from 26, so the zone goes
+        // through atZone instead.
+        else -> then.atZone(ZoneOffset.UTC).toLocalDate().toString()
     }
 }
 

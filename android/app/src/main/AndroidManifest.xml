@@ -4,6 +4,11 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Android 13 and later ask for this before any notification is drawn.
+         Without it every notify() is dropped in silence. The app asks for it
+         the first time the list screen opens, and it works with it refused:
+         the nudge is then only the row appearing in the list. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".TehaApp"
@@ -42,6 +47,27 @@
             android:taskAffinity=":quickadd"
             android:theme="@style/Theme.Teha.Transparent"
             android:windowSoftInputMode="adjustResize|stateVisible" />
+
+        <!-- The share target. It is a subclass of the capture window and it
+             is exported, which the window itself is not: a share sheet needs
+             an exported activity, and nothing else may pop the capture window
+             over whatever is on the screen. It accepts one action and one
+             type, and what arrives is a draft that the user still sends. -->
+        <activity
+            android:name=".ShareActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:taskAffinity=":quickadd"
+            android:label="@string/share_label"
+            android:theme="@style/Theme.Teha.Transparent"
+            android:windowSoftInputMode="adjustResize|stateVisible">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
 
         <service
             android:name=".tile.QuickAddTileService"

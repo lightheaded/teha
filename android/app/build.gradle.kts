@@ -102,6 +102,16 @@ kotlin {
     }
 }
 
+// Room writes the schema of every version into this directory. Versions 1 and
+// 2 were never exported, which is why MigrationTest.kt builds the old version
+// out of the new one instead of reading a file. From version 3 on the file
+// exists, so a later migration can also use MigrationTestHelper, which needs
+// the schema of the version it starts from. The build writes it: commit it
+// with the migration that produced it.
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
     // The gomobile binding. CI produces it. See android/README.md.
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))
@@ -112,6 +122,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.security.crypto)
+    implementation(libs.androidx.work.runtime)
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)

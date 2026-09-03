@@ -67,6 +67,17 @@ data class TaskDto(
 )
 
 @Serializable
+data class CommentDto(
+    val id: String,
+    @SerialName("task_id") val taskId: String = "",
+    @SerialName("account_id") val accountId: String = "",
+    val body: String = "",
+    @SerialName("created_at") val createdAt: String = "",
+    @SerialName("deleted_at") val deletedAt: String? = null,
+    @SerialName("v") val version: Long = 0,
+)
+
+@Serializable
 data class CommandDto(val uuid: String, val type: String, val args: JsonObject)
 
 @Serializable
@@ -88,6 +99,7 @@ data class SyncResponse(
     val sections: List<SectionDto> = emptyList(),
     val labels: List<LabelDto> = emptyList(),
     val tasks: List<TaskDto> = emptyList(),
+    val comments: List<CommentDto> = emptyList(),
     // reset means "throw away what you hold and pull from zero". It arrives
     // when a shared list stops being shared: a scoped pull cannot report that
     // a row went away, so the server says so once. See store.Delta.

@@ -5,6 +5,7 @@ package io.github.lightheaded.teha.data
 import android.content.Context
 import androidx.sqlite.db.SimpleSQLiteQuery
 import io.github.lightheaded.teha.data.db.AccountEntity
+import io.github.lightheaded.teha.data.db.CommentEntity
 import io.github.lightheaded.teha.data.db.LabelEntity
 import io.github.lightheaded.teha.data.db.MetaEntity
 import io.github.lightheaded.teha.data.db.OutboxEntity
@@ -15,10 +16,12 @@ import io.github.lightheaded.teha.data.db.TehaDatabase
 import io.github.lightheaded.teha.data.net.ApiClient
 import io.github.lightheaded.teha.data.net.ApiError
 import io.github.lightheaded.teha.data.net.CommandDto
+import io.github.lightheaded.teha.data.net.CommentDto
 import io.github.lightheaded.teha.data.net.LabelDto
 import io.github.lightheaded.teha.data.net.ProjectDto
 import io.github.lightheaded.teha.data.net.SectionDto
 import io.github.lightheaded.teha.data.net.SyncRequest
+import io.github.lightheaded.teha.data.net.SyncResponse
 import io.github.lightheaded.teha.data.net.TaskDto
 import io.github.lightheaded.teha.parser.Binding
 import io.github.lightheaded.teha.parser.ParsedLine
@@ -79,9 +82,40 @@ sealed interface Edit {
     data class Section(val sectionId: String?) : Edit
 }
 
+/**
+ * Nudge is something the other person did that this phone has to say out loud.
+ *
+ * The repository reports the fact and never the sentence: Notifier writes the
+ * words, exactly as internal/push does on the server. See DECISIONS.md D-020.
+ *
+ * The phone has no push transport of its own, so a nudge is found by comparing
+ * what a pull brought with what this database already held. The latency is
+ * therefore the sync interval and not a second. docs/BACKLOG.md says so.
+ */
+data class Nudge(
+    /** ASSIGNED or COMMENTED. */
+    val kind: String,
+    val taskId: String,
+    val title: String,
+    /** The name of the person who did it, or an empty string before the household is known. */
+    val who: String,
+    /** The text of a comment. Empty for an assignment. */
+    val body: String,
+) {
+    companion object {
+        const val ASSIGNED = "assigned"
+        const val COMMENTED = "commented"
+    }
+}
+
 /** The result of one sync. */
 sealed interface SyncResult {
-    data class Ok(val version: Long, val rejected: List<String>) : SyncResult
+    data class Ok(
+        val version: Long,
+        val rejected: List<String>,
+        val nudges: List<Nudge> = emptyList(),
+    ) : SyncResult
+
     data class Failed(val message: String, val unauthorized: Boolean) : SyncResult
 }
 
@@ -135,6 +169,10 @@ class TehaRepository(context: Context) {
 
     fun task(id: String): Flow<TaskEntity?> = db.tasks().byIdFlow(id)
     fun subtasks(parentId: String): Flow<List<TaskEntity>> = db.tasks().children(parentId)
+    fun comments(taskId: String): Flow<List<CommentEntity>> = db.comments().forTask(taskId)
+
+    /** projectTasks reads one list whole: what is open and what is done. */
+    fun projectTasks(projectId: String): Flow<List<TaskEntity>> = db.tasks().inProject(projectId)
 
     suspend fun projectsNow(): List<ProjectEntity> = db.projects().allNow()
 
@@ -481,6 +519,101 @@ class TehaRepository(context: Context) {
      * still returns the row, so the local row does the same. Marking it, and
      * not removing it, is what lets restore put it back with no pull.
      */
+    /**
+     * addItem puts one item on a shopping list, in the aisle the history
+     * suggests.
+     *
+     * The aisle is a section of the project, so shopping mode needs no schema
+     * of its own. See DECISIONS.md D-021. Learning it is one lookup: the
+     * newest item of the same name that carries a heading wins, and a person
+     * who files it somewhere else teaches the next one.
+     *
+     * The name is matched without its count and without its case, so "Milk",
+     * "milk" and "2x milk" are one item.
+     */
+    suspend fun addItem(projectId: String, text: String): String? {
+        val title = text.trim()
+        if (title.isEmpty()) return null
+        val id = Binding.newId("t")
+        val key = normalItem(title)
+        val section = db.tasks().filedInProject(projectId)
+            .filter { normalItem(it.title) == key }
+            .maxByOrNull { it.completedAt ?: it.id }
+            ?.sectionId
+
+        db.tasks().upsertOne(
+            TaskEntity(
+                id = id, projectId = projectId, sectionId = section, assigneeId = null,
+                parentId = null, orderKey = "m", title = title, description = "",
+                priority = 4, dueDate = null, dueTime = null, dueTz = null,
+                rrule = null, rruleFromCompletion = false, startDate = null,
+                deadline = null, durationMin = null, state = "open",
+                completedAt = null, deletedAt = null, labels = emptyList(), version = 0,
+            )
+        )
+        queue("task_add", buildJsonObject {
+            put("id", id)
+            put("project_id", projectId)
+            put("title", title)
+            if (section != null) put("section_id", section)
+        })
+        return id
+    }
+
+    // --- comments -----------------------------------------------------------
+    // A comment is a row with an author, and only the author changes it. The
+    // server refuses the rest, so the screen offers the controls to nobody
+    // else. See DECISIONS.md D-020.
+
+    /**
+     * comment writes one line of talk and queues it.
+     *
+     * The id is made here, exactly as it is for a task, so the row appears at
+     * once and the same uuid reaches the server whenever the network allows.
+     */
+    suspend fun comment(taskId: String, body: String): String? {
+        val text = body.trim()
+        if (text.isEmpty()) return null
+        val id = Binding.newId("cm")
+        db.comments().upsertOne(
+            CommentEntity(
+                id = id,
+                taskId = taskId,
+                accountId = settings.accountId,
+                body = text,
+                createdAt = Instant.now().toString(),
+                deletedAt = null,
+                version = 0,
+            )
+        )
+        queue("comment_add", buildJsonObject {
+            put("id", id)
+            put("task_id", taskId)
+            put("body", text)
+        })
+        return id
+    }
+
+    suspend fun editComment(id: String, body: String) {
+        val text = body.trim()
+        if (text.isEmpty()) return
+        val row = db.comments().byId(id) ?: return
+        db.comments().upsertOne(row.copy(body = text))
+        queue("comment_update", buildJsonObject { put("id", id); put("body", text) })
+    }
+
+    /**
+     * deleteComment hides the line here and asks the server to hide it there.
+     *
+     * The row leaves this database rather than carrying a stamp, because a
+     * deleted comment is never drawn and a pull removes it the same way. See
+     * the delta loop in sync().
+     */
+    suspend fun deleteComment(id: String) {
+        db.comments().deleteById(id)
+        queue("comment_delete", buildJsonObject { put("id", id) })
+    }
+
     suspend fun delete(taskId: String) {
         val task = db.tasks().byId(taskId) ?: return
         db.tasks().upsertOne(task.copy(deletedAt = Instant.now().toString()))
@@ -587,12 +720,25 @@ class TehaRepository(context: Context) {
                     db.projects().clear()
                     db.sections().clear()
                     db.labels().clear()
+                    db.comments().clear()
                 }
+
+                // What the pull brings that somebody else did. It has to be
+                // read BEFORE the rows are written, because the answer is the
+                // difference between the two. A fresh start says nothing: on
+                // a first pull every task looks newly assigned.
+                val nudges = if (since > 0 && !response.reset) findNudges(response) else emptyList()
 
                 db.projects().upsert(response.projects.map { it.toEntity() })
                 db.sections().upsert(response.sections.map { it.toEntity() })
                 db.labels().upsert(response.labels.map { it.toEntity() })
                 db.tasks().upsert(response.tasks.map { it.toEntity() })
+                // A deleted comment leaves this database rather than staying
+                // as a tombstone. Nothing here reads one, and a row that is
+                // never drawn is a row that only costs space.
+                val (goneTalk, liveTalk) = response.comments.partition { it.deletedAt != null }
+                goneTalk.forEach { db.comments().deleteById(it.id) }
+                db.comments().upsert(liveTalk.map { it.toEntity() })
 
                 // Who is asking, and where their inbox is. The server answers
                 // both on every sync, so a phone learns them without a second
@@ -627,7 +773,7 @@ class TehaRepository(context: Context) {
                 // a task for ever that the server has never heard of.
                 if (refused.isNotEmpty()) undoRefused(refused)
 
-                SyncResult.Ok(response.version, rejected)
+                SyncResult.Ok(response.version, rejected, nudges)
             } catch (e: ApiError) {
                 SyncResult.Failed(e.message ?: "The request failed.", e.unauthorized)
             } catch (e: IOException) {
@@ -639,6 +785,61 @@ class TehaRepository(context: Context) {
                 SyncResult.Failed("The sync failed. ${e.message}", false)
             }
         }
+    }
+
+    /**
+     * findNudges reads what the other person did, out of a delta.
+     *
+     * It runs before the delta is written, because every answer here is the
+     * difference between what arrived and what this database holds.
+     *
+     * Two facts are worth saying out loud, and they are the two the server
+     * sends a Web Push for: a task that is now mine and was not, and a line
+     * somebody else wrote. Everything else is a change a person finds when
+     * they look.
+     *
+     * Nothing about my own action is a nudge. Assigning a task to yourself and
+     * answering your own comment are both silent, on the phone as on the
+     * server.
+     */
+    private suspend fun findNudges(response: SyncResponse): List<Nudge> {
+        val me = settings.accountId
+        if (me.isEmpty()) return emptyList()
+        val out = mutableListOf<Nudge>()
+        val names = db.accounts().allNow().associate { it.id to it.name }
+
+        for (dto in response.tasks) {
+            if (dto.assigneeId != me || dto.deletedAt != null) continue
+            val before = db.tasks().byId(dto.id)
+            // A task that is new to this phone AND assigned to me is a nudge
+            // as well: the other person made it and gave it away in one write.
+            if (before != null && before.assigneeId == me) continue
+            out += Nudge(
+                kind = Nudge.ASSIGNED,
+                taskId = dto.id,
+                title = dto.title,
+                // The server does not say who wrote the change, so the name is
+                // the one other person in a household of two, and nothing at
+                // all in a bigger one. See docs/BACKLOG.md.
+                who = names.filterKeys { it != me }.values.singleOrNull().orEmpty(),
+                body = "",
+            )
+        }
+
+        for (dto in response.comments) {
+            if (dto.accountId == me || dto.deletedAt != null) continue
+            // A line this phone already holds is a line it already showed.
+            if (db.comments().byId(dto.id) != null) continue
+            val task = db.tasks().byId(dto.taskId)
+            out += Nudge(
+                kind = Nudge.COMMENTED,
+                taskId = dto.taskId,
+                title = task?.title ?: response.tasks.firstOrNull { it.id == dto.taskId }?.title.orEmpty(),
+                who = names[dto.accountId].orEmpty(),
+                body = dto.body,
+            )
+        }
+        return out
     }
 
     /**
@@ -713,6 +914,7 @@ class TehaRepository(context: Context) {
         db.projects().clear()
         db.sections().clear()
         db.labels().clear()
+        db.comments().clear()
         db.meta().clear()
     }
 
@@ -725,6 +927,23 @@ class TehaRepository(context: Context) {
     }
 }
 
+/**
+ * QTY reads a count in front of an item: "2x milk", "2 × milk". The x is
+ * required, so "20 minutes of stretching" is a task and not twenty minutes.
+ * internal/webui/assets/app.js holds the same pattern.
+ */
+private val QTY = Regex("""^(\d{1,3})\s*[x\u00d7]\s*(.+)$""", RegexOption.IGNORE_CASE)
+
+/** itemCount and itemName split "2x milk" into the chip and the words. */
+fun itemCount(title: String): String = QTY.find(title.trim())?.groupValues?.get(1).orEmpty()
+
+fun itemName(title: String): String =
+    QTY.find(title.trim())?.groupValues?.get(2)?.trim() ?: title.trim()
+
+/** normalItem is the key that "Milk", "milk" and "2x milk" share. */
+fun normalItem(title: String): String =
+    itemName(title).lowercase().replace(Regex("""\s+"""), " ")
+
 private fun ProjectDto.toEntity() = ProjectEntity(
     id = id, name = name, color = color, parentId = parentId,
     orderKey = orderKey, isInbox = isInbox, deletedAt = deletedAt, version = version,
@@ -733,6 +952,11 @@ private fun ProjectDto.toEntity() = ProjectEntity(
 private fun SectionDto.toEntity() = SectionEntity(
     id = id, projectId = projectId, name = name, orderKey = orderKey,
     deletedAt = deletedAt, version = version,
+)
+
+private fun CommentDto.toEntity() = CommentEntity(
+    id = id, taskId = taskId, accountId = accountId, body = body,
+    createdAt = createdAt, deletedAt = deletedAt, version = version,
 )
 
 private fun LabelDto.toEntity() = LabelEntity(

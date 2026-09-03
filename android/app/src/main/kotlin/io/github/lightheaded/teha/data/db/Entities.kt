@@ -83,6 +83,27 @@ data class AccountEntity(
     val isOwner: Boolean,
 )
 
+/**
+ * CommentEntity is one line of talk on one task.
+ *
+ * The shape follows the server row: an author, a body and the two stamps. The
+ * author is the only person who may change or remove the line, and the server
+ * enforces that, so the screen offers the controls to nobody else.
+ *
+ * createdAt orders a conversation, and the id breaks a tie: an import gives a
+ * whole conversation the same second.
+ */
+@Entity(tableName = "comments")
+data class CommentEntity(
+    @PrimaryKey val id: String,
+    val taskId: String,
+    val accountId: String,
+    val body: String,
+    val createdAt: String,
+    val deletedAt: String?,
+    val version: Long,
+)
+
 @Entity(tableName = "labels")
 data class LabelEntity(
     @PrimaryKey val id: String,

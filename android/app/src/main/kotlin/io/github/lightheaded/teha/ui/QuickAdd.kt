@@ -48,8 +48,12 @@ fun QuickAddBar(
     onSubmit: (String) -> Unit,
     modifier: Modifier = Modifier,
     autoFocus: Boolean = false,
+    // start seeds the field. The share target hands over a line another app
+    // wrote, and it is a draft: the user can edit it, add a date or a project,
+    // and only then send it.
+    start: String = "",
 ) {
-    var text by remember { mutableStateOf("") }
+    var text by remember { mutableStateOf(start) }
     val parsed = remember(text) { parse(text) }
     val focus = remember { FocusRequester() }
 

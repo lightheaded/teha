@@ -16,12 +16,16 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ProjectEntity::class,
         SectionEntity::class,
         AccountEntity::class,
+        CommentEntity::class,
         LabelEntity::class,
         OutboxEntity::class,
         MetaEntity::class,
     ],
-    version = 2,
-    exportSchema = false,
+    version = 3,
+    // The schema of every version is written into app/schemas and committed.
+    // MigrationTestHelper reads it, so a migration written from version 3 on
+    // has a test that runs on a device. See MigrationTest.kt.
+    exportSchema = true,
 )
 @TypeConverters(Converters::class)
 abstract class TehaDatabase : RoomDatabase() {
@@ -29,6 +33,7 @@ abstract class TehaDatabase : RoomDatabase() {
     abstract fun projects(): ProjectDao
     abstract fun sections(): SectionDao
     abstract fun accounts(): AccountDao
+    abstract fun comments(): CommentDao
     abstract fun labels(): LabelDao
     abstract fun outbox(): OutboxDao
     abstract fun meta(): MetaDao
@@ -75,6 +80,34 @@ abstract class TehaDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Version 3 is the talk on a task.
+         *
+         * A real migration, for the same reason as version 2: the outbox is
+         * the one table the server cannot rebuild.
+         *
+         * The watermark goes, exactly as it did in version 2. A comment
+         * written before this build has a version below the watermark, so a
+         * delta above the watermark never carries it. Without the full pull
+         * the talk on a task would start empty and fill only with what is
+         * said from now on. The outbox is untouched.
+         *
+         * The statement must match what Room generates for CommentEntity,
+         * column for column: Room compares the two at open time and refuses a
+         * database that disagrees.
+         */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `comments` (" +
+                        "`id` TEXT NOT NULL, `taskId` TEXT NOT NULL, `accountId` TEXT NOT NULL, " +
+                        "`body` TEXT NOT NULL, `createdAt` TEXT NOT NULL, `deletedAt` TEXT, " +
+                        "`version` INTEGER NOT NULL, PRIMARY KEY(`id`))"
+                )
+                db.execSQL("DELETE FROM `meta`")
+            }
+        }
+
         @Volatile
         private var instance: TehaDatabase? = null
 
@@ -85,7 +118,7 @@ abstract class TehaDatabase : RoomDatabase() {
                     TehaDatabase::class.java,
                     "teha.db",
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     // The fallback stays for a path that has no migration at
                     // all, which is a downgrade or a version nobody wrote a
                     // step for. It costs one full pull, and it costs the

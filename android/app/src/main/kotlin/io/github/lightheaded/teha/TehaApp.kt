@@ -3,6 +3,7 @@
 package io.github.lightheaded.teha
 
 import android.app.Application
+import io.github.lightheaded.teha.data.SyncWorker
 import io.github.lightheaded.teha.data.TehaRepository
 
 /**
@@ -14,4 +15,12 @@ import io.github.lightheaded.teha.data.TehaRepository
  */
 class TehaApp : Application() {
     val repository: TehaRepository by lazy { TehaRepository(this) }
+
+    override fun onCreate() {
+        super.onCreate()
+        // The background sync. It drains the outbox and pulls when nobody has
+        // the app open, which is what makes an offline capture reach the
+        // server and a task somebody gave you arrive. See SyncWorker.
+        SyncWorker.schedule(this)
+    }
 }

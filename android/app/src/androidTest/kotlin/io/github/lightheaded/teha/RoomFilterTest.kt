@@ -6,6 +6,7 @@ import androidx.room.Room
 import androidx.sqlite.db.SimpleSQLiteQuery
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import io.github.lightheaded.teha.data.db.CommentEntity
 import io.github.lightheaded.teha.data.db.TaskEntity
 import io.github.lightheaded.teha.data.db.TehaDatabase
 import io.github.lightheaded.teha.parser.Binding
@@ -83,6 +84,32 @@ class RoomFilterTest {
         assertEquals(listOf("t1", "t2"), rows("overdue | p1"))
     }
 
+    /**
+     * `comment:` reads the comments table since the phone joined the
+     * conversation. The Go test proves the meaning of the term, and this one
+     * proves that the column names it compiles to are the ones Room made.
+     */
+    @Test
+    fun aCommentTermReadsTheTalk() = runBlocking {
+        db.tasks().upsert(
+            listOf(
+                task("t1", title = "Call the plumber"),
+                task("t2", title = "Buy milk"),
+            )
+        )
+        db.comments().upsert(
+            listOf(
+                comment("cm1", "t1", "The leak is under the sink"),
+                comment("cm2", "t2", "The green one, not the blue"),
+                // A deleted line must not answer, exactly as on the server.
+                comment("cm3", "t2", "the leak is fixed", deleted = "2026-08-25T10:00:00Z"),
+            )
+        )
+        assertEquals(listOf("t1"), rows("comment: leak"))
+        assertEquals(listOf("t2"), rows("note: green"))
+        assertEquals(emptyList<String>(), rows("comment: nothing at all"))
+    }
+
     /** A filter the compiler refuses carries a message and no SQL. */
     @Test
     fun aBadFilterSaysWhatIsWrong() {
@@ -90,6 +117,21 @@ class RoomFilterTest {
         assertEquals("", compiled.sql)
         assertTrue("no message came back", compiled.error.isNotEmpty())
     }
+
+    private fun comment(
+        id: String,
+        taskId: String,
+        body: String,
+        deleted: String? = null,
+    ) = CommentEntity(
+        id = id,
+        taskId = taskId,
+        accountId = "owner",
+        body = body,
+        createdAt = "2026-08-25T09:00:00Z",
+        deletedAt = deleted,
+        version = 1,
+    )
 
     private fun task(
         id: String,

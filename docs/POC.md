@@ -346,7 +346,7 @@ stamps with the version counter. It travels in the pull with every other row.
 | Everybody who sees the task sees the talk | A comment hangs off a task, which hangs off a project, so one visibility rule answers | A comment on an unshared list is unreadable to the other account, and readable one line later when the list is shared |
 | A line belongs to whoever said it | `account_id` is the author, and the gate refuses an edit or a delete by anybody else | Both refusals arrive as one sentence, and the author's own edit lands |
 | A query reaches comment text | `comment:` reads the table, in the Go compiler and in the browser evaluator | Five cases in `parser-fixtures/filter.json`, answered by real SQLite and demanded of the browser |
-| A store with no comments says so | `filter.Schema` leaves the table name empty, and the term fails | The phone dialect refuses `comment:` with a sentence |
+| A store with no comments says so | `filter.Schema` leaves the table name empty, and the term fails | A schema stripped of the table refuses `comment:` with a sentence |
 | An import keeps a conversation | A Todoist comment becomes a row and keeps its posting time | The zero-loss fixture demands both comments of one task, in order, and no deleted one |
 | Being given a task is worth hearing | `ApplyWithEvents` reports the fact, `internal/push` writes the words | An assignment and a comment reach the other person's devices, and a repeat or a self-assignment sends nothing |
 | Nobody hears about a task they cannot see | The gate refuses an assignment to a person who cannot see the list | Three shapes of that command are refused, and the same command works once the list is shared |
@@ -422,8 +422,8 @@ the wrong place for a line somebody deleted on purpose. See
 
 ## What this build does not have
 
-*Updated 2026-09-02, with the comments, shopping mode, the notifications, the
-IndexedDB copy and the phone in the household.*
+*Updated 2026-09-03, with the activity log and the phone reaching what the
+browser reaches.*
 
 - No widget, and no signature on the macOS app. The desktop shell hosts the web
   app, a global shortcut opens a quick add panel over every application, a menu
@@ -431,31 +431,36 @@ IndexedDB copy and the phone in the household.*
   Raycast or Keyboard Maestro. The build is unsigned, per the Phase 4 decision
   about identity, and the panel shows no parse hint before `Enter`, because the
   parser is in the page.
-- The Android app has a quick settings tile, the six built-in views of the
-  browser, one view per project, and a field that takes any query the filter
-  grammar knows. It joins a household, assigns a task, files one under a
-  heading and acts on `reset`. It has no notification, no background sync, no
-  comments and no shopping layout, and it cannot write an invitation or share a
-  list: both are the owner's jobs and both are in the browser.
+- The Android app reaches what the browser reaches, with two exceptions. It has
+  a quick settings tile, a share target, the six built-in views, one view per
+  project, a field that takes any query the grammar knows, comments, shopping
+  mode, and a background sync every fifteen minutes. It joins a household,
+  assigns a task, files one under a heading and acts on `reset`. **What it does
+  not have:** a notification that arrives at once, because it has no push
+  transport and a nudge is found by comparing a pull with what it held; and a
+  way to write an invitation or share a list, because both are the owner's jobs
+  and both are in the browser.
 - No attachment. A comment is a row with an author, and only the author changes
   it. A file has nowhere to go: no part of this build stores one.
-- Shopping mode runs in the browser, not on the phone. An aisle is a section of
+- Shopping mode runs in the browser and on the phone. An aisle is a section of
   the project and the suggestions come from what the list has held, so it
-  needed no table.
+  needed no table on either.
 - Push works in the browser and in the installed web app, and nowhere else. A
   reminder and a push subscription belong to one person, so two people who
   share a chore each keep their own nudge. A task given to somebody, and a
   comment on a task they can see, both notify them. Neither is retried: an
-  event is sent and forgotten.
+  event is sent and forgotten. The phone notifies without a push, by comparing
+  a pull with what it held, so it hears within about a quarter of an hour and
+  not within a second.
 - No second factor beyond the passkey itself. The browser signs in with a
   passkey, with an invitation code, or with the device token, and each account
   has a token of its own.
 - The web app draws a calendar of the current view, as a month or as a week,
   with drag to reschedule. It has no hour grid, so a task with a time sorts to
   the top of its day rather than sitting at its hour.
-- The phone holds no comment table, so `comment:` fails there with a sentence
-  instead of compiling. It holds the sections and the people now, so `/section`,
-  `no section` and every `assigned` term answer there.
+- The phone answers every term of the grammar except `created:`. It holds the
+  comments, the sections and the people, so `comment:`, `/section`, `no
+  section` and every `assigned` term compile there in the Room column names.
 - The browser holds no creation date, so `created:` fails there in the same way
   and for the same reason. Every other term of the grammar answers the same in
   the browser, on the phone and on the server, and
@@ -559,25 +564,28 @@ IndexedDB copy and the phone in the household.*
 
 ## Next, in order
 
-*Updated 2026-09-02. The earlier list is done: the phone is in the household,
-a comment is a row, shopping mode runs, an assignment and a comment notify, and
-the local copy is in IndexedDB.*
+*Updated 2026-09-03. The earlier list is done except for the two items that
+need a person: the activity log is built, and the phone now reaches what the
+browser reaches.*
 
-1. **Use it.** Everything M2, M5 and M6 name is built, and three exit tests
-   need a person and not code: one week of the web app, one week of the macOS
-   shell, and one month of the partner's shopping. Nothing on this list matters
+1. **Use it.** Every milestone from M2 to M6 says "built" and none of them says
+   "proven". Four exit tests need a person and not code: one week of the web
+   app, one week of the macOS shell, the author uninstalling Todoist from the
+   phone, and one month of the partner's shopping. Nothing on this list matters
    more than starting them.
-2. **The hour grid on the week calendar.** The last layout the plan names that
+2. **Attachments.** The one Phase 2 item that no part of this build can do,
+   because nothing here stores a file. It needs blob storage, a size cap, an
+   upload and a download path, per-household scoping, a CSP rule for an image,
+   a backup answer for the files, and offline behaviour in three clients. It is
+   the first thing that is not a row.
+3. **The hour grid on the week calendar.** The last layout the plan names that
    this build draws differently: a week is seven day columns, so a task with a
    time sorts to the top of its day. Time blocking in Phase 3 needs the grid.
-3. **Comments on the phone.** A conversation that only one client can read is
-   half a conversation. It needs a Room entity, the rows in the sync mapping,
-   and a place in the detail sheet.
-4. **The activity log.** Phase 2 names one per project and per task, with
-   restore, and §6.6 asks for the same table as the audit trail of a login.
-   Nothing in this build records who did what.
+4. **Order keys in the clients.** The `order` package exists with a property
+   test, and no client calls it. All three write the literal `m`, so a list
+   falls back to its secondary sorts and a drag cannot be saved. It is the
+   oldest open shortcut in this build.
 5. **The drill against the real bucket, on a schedule.** The restore is
    rehearsed on a laptop and it passes. Nobody has restored from the bucket the
    deployment writes to, which is the run that also proves the credentials, and
    nothing runs it monthly.
-

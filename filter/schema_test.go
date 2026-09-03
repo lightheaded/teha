@@ -275,7 +275,7 @@ func TestRoomSQLNamesNoServerColumn(t *testing.T) {
 		"wont do", "open", "any state", "week", "p1", "p4", "#Home", "#inbox",
 		"#Home*", "##Home", "%work", "@work", "%work*", "search: text",
 		"date: today", "before: today", "after: today", "deadline: today",
-		"deadline before: today", "a bare word",
+		"deadline before: today", "a bare word", "comment: text", "note: text",
 	}
 	banned := []string{
 		"due_date", "due_time", "project_id", "parent_id", "start_date",
@@ -337,6 +337,9 @@ func TestRoomAnswersASectionAndAnAssigneeTerm(t *testing.T) {
 		{"unassigned", "assigneeId"},
 		{"assigned to: me", "assigneeId = ?"},
 		{"assigned to: Partner", "FROM accounts"},
+		// The phone holds the talk on a task since 2026-09-03.
+		{"comment: leak", "FROM comments"},
+		{"note: leak", "taskId"},
 	}
 	for _, tc := range cases {
 		sql, _, err := CompileFor(tc.query, today, schema)

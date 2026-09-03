@@ -142,9 +142,12 @@ var ServerSchema = Schema{
 //
 //   - Labels is a comma-joined column, so a label term becomes a LIKE over a
 //     padded copy of that column and never a join.
-//   - CreatedAt is absent, so a `created:` term fails with a message. Comment
-//     is absent as well, so `comment:` fails on the phone rather than searching
-//     the description and answering something close but wrong.
+//   - CreatedAt is absent, so a `created:` term fails with a message. The
+//     sync payload carries no creation date, so no client outside the server
+//     can answer that term.
+//   - The phone holds the comments since 2026-09-03, so `comment:` answers
+//     there. The column names differ from the server, which is exactly what
+//     this type exists for.
 //   - The phone holds the sections and the people of the household since it
 //     joined it, so a section term and an assignee term both answer. A person
 //     has one name here and two on the server, so AccountDisplay is empty and
@@ -158,6 +161,7 @@ var RoomSchema = Schema{
 	Label:   "labels",
 	Section: "sections",
 	Account: "accounts",
+	Comment: "comments",
 
 	ID:        "id",
 	Name:      "name",
@@ -176,6 +180,8 @@ var RoomSchema = Schema{
 	State:       "state",
 	SectionID:   "sectionId",
 	Assignee:    "assigneeId",
+	CommentTask: "taskId",
+	CommentBody: "body",
 	CreatedAt:   "",
 
 	Labels: "labels",

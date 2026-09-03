@@ -54,12 +54,28 @@ class Settings(context: Context) {
     val isConfigured: Boolean
         get() = serverUrl.isNotEmpty()
 
+    /**
+     * shopClear is the moment somebody emptied the basket of one list.
+     *
+     * A completed item stays completed, so the basket needs its own mark for
+     * "this trip". The browser keeps the same value per project. It is a
+     * device setting and not account data: two people in one shop each empty
+     * their own basket, and neither wants the other's screen to change.
+     */
+    fun shopClear(projectId: String): String =
+        prefs.getString(KEY_SHOP_CLEAR + projectId, "") ?: ""
+
+    fun setShopClear(projectId: String, stamp: String) {
+        prefs.edit().putString(KEY_SHOP_CLEAR + projectId, stamp).apply()
+    }
+
     companion object {
         private const val KEY_SERVER = "server_url"
         private const val KEY_TOKEN = "device_token"
         private const val KEY_ACCOUNT = "account_id"
         private const val KEY_ACCOUNT_NAME = "account_name"
         private const val KEY_INBOX = "inbox_id"
+        private const val KEY_SHOP_CLEAR = "shop_clear_"
         private const val FILE = "teha_secure"
 
         /** normalize removes a trailing slash, so that path joins stay simple. */

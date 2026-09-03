@@ -223,6 +223,31 @@ column names, which are not the server's. See D-014 in
 The one term the phone refuses is `created:`. The local database keeps no
 creation date, so the message says so instead of answering with the wrong rows.
 
+### What the phone does beside the list
+
+**Share to teha.** Share text from any app and pick **Add to teha**. The
+capture window opens with the line already in the field, so a date, a project
+or a label can still be typed before it is sent. A shared web page arrives as
+its title and its address together.
+
+**Comments.** Open a task and scroll to **Comments**. Everybody who can see the
+task reads the talk. A line of your own opens for editing when you tap it, and
+carries a delete button; a line of somebody else's carries neither, because the
+server refuses both.
+
+**Shopping mode.** Open a project view and touch the trolley in the top bar.
+The items group under the headings of that project, a count in the title draws
+as a chip, and the whole row ticks. What was bought before appears as chips to
+tap, and a new item goes into the aisle where that item went last time. A
+ticked item stays on the screen in the basket until **Clear**. Back leaves the
+mode.
+
+**Sync in the background.** The app syncs every fifteen minutes on its own, and
+as soon as it can after a capture from the tile. A task somebody gives you, and
+a comment somebody writes, arrive as a notification. It is not push: the
+notification comes with the sync, so it is late by up to that interval. See
+[BACKLOG.md](BACKLOG.md).
+
 ## The macOS desktop app
 
 `desktop/` holds a Tauri v2 shell around the same web app. It adds four things
