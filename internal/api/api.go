@@ -83,6 +83,7 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /v1/sections", s.guard(s.handleSections))
 	mux.HandleFunc("GET /v1/labels", s.guard(s.handleLabels))
 	mux.HandleFunc("GET /v1/export", s.guard(s.handleExport))
+	mux.HandleFunc("GET /v1/activity", s.guard(s.handleActivity))
 	mux.HandleFunc("GET /v1/events", s.guard(s.handleEvents))
 	mux.HandleFunc("GET /v1/push/key", s.guard(s.handlePushKey))
 	mux.HandleFunc("POST /v1/push/subscribe", s.guard(s.handlePushSubscribe))

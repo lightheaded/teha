@@ -197,6 +197,7 @@ func (s *Server) handleInviteCreate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	s.Store.Note(me.ID, store.ActionInviteCreate, inv.Name, "", s.clientIP(r))
 	s.Log.Info("an invitation was written", "for", inv.Name, "expires", inv.ExpiresAt)
 	// The code is in this answer and in no other. The store keeps its hash.
 	writeJSON(w, http.StatusOK, inv)
@@ -222,6 +223,9 @@ func (s *Server) handleInviteRevoke(w http.ResponseWriter, r *http.Request) {
 	if err := s.Store.RevokeInvite(req.ID); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if me, ok := s.caller(r); ok {
+		s.Store.Note(me.ID, store.ActionInviteRevoke, "", "", s.clientIP(r))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
@@ -255,6 +259,11 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.clearFailures(r)
+	// Two lines, because two people need this one. The owner reads it in their
+	// own log as the invitation being used, and the new account reads its own
+	// first line.
+	s.Store.Note(store.OwnerID, store.ActionJoined, account.DisplayName, "", s.clientIP(r))
+	s.Store.Note(account.ID, store.ActionJoined, account.DisplayName, "", s.clientIP(r))
 	s.Log.Info("somebody joined the household", "account", account.ID, "name", account.DisplayName)
 
 	// The browser keeps the device token in a cookie, exactly as the owner's
@@ -316,7 +325,36 @@ func (s *Server) handleShare(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// The line belongs to the list, so everybody who can see the list reads it.
+	name := ""
+	if a, err := s.Store.AccountByID(req.AccountID); err == nil {
+		name = a.DisplayName
+	}
+	if req.Share {
+		s.Store.NoteIn(me.ID, store.ActionShare, req.ProjectID, name, "")
+	} else {
+		// An unshare needs two lines. The one on the list stays for the people
+		// who still see it, and the person who lost the list cannot read that
+		// line any more, so they get a personal one that says the list went.
+		s.Store.NoteIn(me.ID, store.ActionUnshare, req.ProjectID, name, "")
+		s.Store.Note(req.AccountID, store.ActionUnshare, projectName(s, req.ProjectID), "", "")
+	}
 	v, _ := s.Store.Version()
 	s.Notify(v)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// projectName reads the name of a list for a log line. An unreadable row gives
+// an empty string, and the line then says only that a list went.
+func projectName(s *Server, projectID string) string {
+	ps, err := s.Store.Projects()
+	if err != nil {
+		return ""
+	}
+	for _, p := range ps {
+		if p.ID == projectID {
+			return p.Name
+		}
+	}
+	return ""
 }

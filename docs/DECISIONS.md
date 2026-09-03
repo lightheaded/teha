@@ -902,3 +902,49 @@ own, and `scripts/screenshots.mjs` proves the real binding in a real browser.
 
 **Reverses if:** the browser needs to answer a query it cannot hold in memory,
 which is the point at which a query engine earns its megabyte.
+
+## D-023 — The activity log lives outside sync, and is read one page at a time
+
+**2026-09-03.** Every write and every login records one line in an `activity`
+table. The table carries no version, takes no part in the change log and never
+enters a delta. A client asks `GET /v1/activity` for a page when a person opens
+the view, and holds none of it.
+
+**Why.** Every other table a client holds is state it works from offline: a
+task, a project, a comment. A log is not state. It only grows, an import writes
+one line per command, and a person opens the view rarely. Putting it into the
+delta would make every client carry a year of history to draw a list of tasks,
+and the first sync of a phone would pull an import twice.
+
+The audit half decides the shape as well. §6.6 of [PLAN.md](PLAN.md) asks for
+one table that holds every login, every token and every failed attempt. A login
+is not a row a client caches, and a failed login must be readable on the server
+whatever the client believes.
+
+**One place writes it.** `recordActivity` runs in `ApplyWithEvents`, once, right
+after a command succeeds and its savepoint is released. It reads the row back
+rather than trusting the arguments, so a `task_add` that took its project from a
+name still logs where the row landed. A log line beside each of the fifty cases
+of `applyOne` is a log line the next case forgets, which is the same reasoning
+as the gate in `reach.go`.
+
+**Scope is the project, exactly as for a task.** A line carries `project_id`,
+and an account reads a line of a project it can see. A line with no project is
+personal to its account: a login, a reminder and a label are nobody else's
+business, the owner of the household included.
+
+**The store writes the fact and the client writes the sentence,** as in D-020.
+The row holds an action name, an id and the title the row had at that moment.
+`internal/webui/assets/activity.js` turns `task_wont_do` into "gave up on". The
+title is stored rather than joined, because the task can be deleted by the time
+somebody reads the log, and a line that cannot name what went is not a record.
+
+**A comment is logged and its words are not.** A deleted comment whose text
+survives in a log nobody can delete is not what a person means by deleting it.
+
+**Cost.** The view needs the network, and it is the only screen here that does.
+It says so. An import writes one line per command, so a 5 000-task import adds
+about 5 000 rows: nothing for SQLite, and nothing that reaches a client.
+
+**Reverses if:** a client needs the log offline, which is the point at which the
+rows have to enter sync and the retention question has to be answered.

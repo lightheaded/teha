@@ -61,6 +61,7 @@ import * as pk from './passkey.js';
 import * as md from './md.js';
 import * as flt from './filter.js';
 import * as db from './db.js';
+import * as act from './activity.js';
 
 const $ = (id) => document.getElementById(id);
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2));
@@ -1065,6 +1066,10 @@ function openDetail(t) {
       <div class="d-talklist"></div>
       <input class="d-newcm" placeholder="Say something, then press Enter">
     </div>
+    <details class="d-hist">
+      <summary>History</summary>
+      <div class="aclist"></div>
+    </details>
     <div class="d-actions">
       <button class="d-del">Delete</button>
       <span class="d-hint">Changes save as you type. Escape closes.</span>
@@ -1176,6 +1181,14 @@ function openDetail(t) {
     };
   });
   drawTalk(el, t);
+  // The history of one task loads when the reader asks for it. It costs a
+  // request, and most of the time nobody opens the panel.
+  const hist = q('.d-hist');
+  hist.ontoggle = () => {
+    if (!hist.open || hist.dataset.loaded) return;
+    hist.dataset.loaded = '1';
+    act.draw(hist.querySelector('.aclist'), { task: t.id }, logContext());
+  };
   q('.d-newcm').onkeydown = (e) => {
     if (e.key !== 'Enter') return;
     const box = q('.d-newcm');
@@ -1623,6 +1636,65 @@ async function drawPasskeys(host, errHost) {
 // digest. A passkey signs this browser in without the device token. The token
 // stays: the phone, the command line client and MCP all use it, and the server
 // asks for it before it enrols a passkey.
+// openHistory shows the activity log: the whole household, or one list when a
+// project view is open.
+//
+// It is a sheet and not a view, because the log is not a list of tasks and
+// nothing in it can be edited. It also needs the network, which every other
+// screen here does not, so it must be a place a person goes on purpose.
+function openHistory() {
+  const open = document.querySelector('.sheet');
+  closeDetail();
+  if (open) return;
+  const project = currentProject();
+  const el = document.createElement('div');
+  el.className = 'sheet';
+  el.innerHTML = `<div class="card set" role="dialog" aria-label="History">
+    <h3>History${project ? ' &middot; ' + esc(project.name) : ''}</h3>
+    <div class="note">Who did what. The server holds this log, so it is the one
+      screen here that needs the network.</div>
+    <div class="aclist"></div>
+    <div class="d-actions">
+      <span class="d-hint">Escape closes.</span>
+      <button class="d-close">Done</button>
+    </div>
+  </div>`;
+  document.body.appendChild(el);
+  S.detail = 'history';
+  el.querySelector('.d-close').onclick = closeDetail;
+  el.onclick = (e) => { if (e.target === el) closeDetail(); };
+  act.draw(el.querySelector('.aclist'), { project: project ? project.id : '' }, logContext());
+}
+
+// logContext is what activity.js needs from this file and must not own: the
+// markup escape, who a person is, and the three things a log line can do.
+function logContext() {
+  return {
+    esc,
+    me: S.me,
+    personName,
+    // known says whether this browser holds the task, which is the test for
+    // offering to open it. A deleted row leaves the local copy, so a task the
+    // log names and this map does not is a task that went away.
+    known: (id) => S.tasks.has(id),
+    gone: (action, id) => (action === 'task_delete' ? !S.tasks.has(id)
+      : action === 'project_delete' ? !S.projects.has(id)
+        : action === 'section_delete' ? !S.sections.has(id) : false),
+    restore: (cmd, id) => {
+      // The row is not in the local copy, so there is nothing to put back
+      // here. The command goes to the server and the next pull brings the row.
+      queue(cmd, { id });
+      sync();
+    },
+    open: (id) => {
+      const t = S.tasks.get(id);
+      if (!t) return;
+      closeDetail();
+      openDetail(t);
+    },
+  };
+}
+
 async function openSettings() {
   // closeDetail removes any open sheet, the task detail included, and clears
   // the detail flag. A second press of the same button then closes this one.
@@ -2723,6 +2795,7 @@ function wire() {
   $('layout').onclick = toggleLayout;
   $('caltoggle').onclick = toggleCalendar;
   $('shoptoggle').onclick = toggleShop;
+  $('histtoggle').onclick = openHistory;
 
   document.addEventListener('keydown', (e) => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {

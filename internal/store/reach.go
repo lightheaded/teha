@@ -92,7 +92,7 @@ func commandReach(tx *sql.Tx, c Command, act actor) (reach, error) {
 	case "project_add":
 		// A person may always make a list of their own.
 
-	case "project_update", "project_delete":
+	case "project_update", "project_delete", "project_restore":
 		var a struct {
 			ID string `json:"id"`
 		}

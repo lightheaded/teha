@@ -267,6 +267,32 @@ nav a .pmenu:hover{color:var(--accent)}
 .cmbody{font-size:14.5px}
 .cmbody[tabindex]{cursor:text;border-radius:6px}
 .cmbody[tabindex]:hover{background:var(--bg-2)}
+/* The activity log. One line per action: who, what, and when. It reads as a
+   sentence, so the parts flow rather than sit in columns, and it wraps on a
+   narrow screen. */
+.d-hist{border-top:1px solid var(--line);padding-top:10px}
+.d-hist summary{cursor:pointer;font-size:12px;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--ink-3)}
+.d-hist .aclist{margin-top:10px}
+.aclist{display:grid;gap:8px;max-height:52vh;overflow-y:auto}
+.acrow{display:flex;flex-wrap:wrap;align-items:baseline;gap:5px;font-size:14px;
+  padding-bottom:7px;border-bottom:1px solid var(--line)}
+.acrow:last-child{border-bottom:none}
+.acwho{font-weight:600}
+.acverb{color:var(--ink-2)}
+.acwhat{color:var(--ink)}
+/* The sheet styles every button as a box (.set button), and two of these are
+   not boxes: a task title is a link and reads as part of the sentence. So each
+   rule below names its list as well, to outrank that one. */
+.aclist .acopen{background:none;border:none;padding:0;font:inherit;color:var(--accent);
+  cursor:pointer;text-align:left}
+.aclist .acopen:hover{text-decoration:underline}
+.acfields,.acwhen{color:var(--ink-3);font-size:12.5px}
+.acwhen{margin-left:auto}
+.aclist .acundo,.aclist .acmore{background:var(--bg-2);border:1px solid var(--line);
+  border-radius:6px;padding:4px 10px;font-size:12.5px;color:var(--ink);cursor:pointer}
+.aclist .acundo:hover,.aclist .acmore:hover{border-color:var(--accent);color:var(--accent)}
+.aclist .acmore{margin-top:4px;justify-self:start}
 .code{display:block;margin-top:6px;padding:8px 10px;font-family:var(--mono);font-size:14px;
   background:var(--bg-2);border:1px solid var(--line);border-radius:7px;overflow-wrap:anywhere;user-select:all}
 [hidden]{display:none}
@@ -284,6 +310,7 @@ nav a .pmenu:hover{color:var(--accent)}
       <button class="lay" id="layout" hidden>Board</button>
       <button class="lay" id="caltoggle">Calendar</button>
       <button class="lay" id="shoptoggle" hidden>Shop</button>
+      <button class="lay" id="histtoggle">History</button>
       <input class="filt" id="filter" placeholder="Filter, press /" aria-label="Filter"
              autocomplete="off" spellcheck="false">
       <span class="st" id="status"></span>

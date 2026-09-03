@@ -203,6 +203,7 @@ memory. A passkey login is one tap, so a restart costs one tap.
 | `/v1/sections` | GET | Every section, in the order of its project. |
 | `/v1/labels` | GET | Every label. |
 | `/v1/export` | GET | The whole account as one JSON file. |
+| `/v1/activity` | GET | One page of the activity log, newest first. `?project=`, `?task=`, `?limit=` (50 by default, 100 at most) and `?before=` for the next page. The answer is `{activity[], more}`, and `before` takes the smallest `seq` of the page just read. |
 | `/v1/events` | GET | Server-sent events. One `version` event per write, and a ping every 25 seconds. |
 | `/v1/push/key` | GET | `{"enabled":true,"key":"...","devices":1}`. The browser subscribes with the key. |
 | `/v1/push/subscribe` | POST | The browser posts its own subscription, unchanged. |
@@ -1429,8 +1430,8 @@ Nothing else uses them.
 **`created:` fails in the browser,** because the sync payload carries no
 creation date. Every other term of the grammar answers the same everywhere.
 
-Next, in order: an hour grid on the week calendar, attachments, the activity
-log, and shopping mode on the phone. [BACKLOG.md](BACKLOG.md) holds every
+Next, in order: an hour grid on the week calendar, attachments, and the phone
+reaching what the browser reaches. [BACKLOG.md](BACKLOG.md) holds every
 knowingly unfinished thing with its reason.
 
 The real Todoist import already ran, on 2026-08-25: 17 projects, 250 tasks, 63

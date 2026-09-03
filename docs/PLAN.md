@@ -122,6 +122,7 @@ Phase 1 is solo daily driving with import from Todoist. Phase 2 makes it a house
   - **Both run.** The board since 2026-08-27, the calendar since 2026-08-31: a month or a week of the current view, drag to another day, a strip of the undated tasks to drag from, and `[` and `]` to step.
 - Deadline field with `{date}` syntax. Duration with `for 30min`.
 - Activity log view per project and per task, with restore.
+  - **Built, 2026-09-03.** One `activity` table holds both halves that this plan asks for: the history of a list, and the audit trail of §6.6. Every command writes one line, and so does every login, passkey, invitation and share. A line is scoped through its project exactly as a task is, and a line with no project is personal. The browser shows the whole household, one list, or one task, and offers Restore on a deleted task, list or heading. It is the one screen that needs the network, because the log is outside sync: see [DECISIONS.md](DECISIONS.md) D-023.
 - Widgets on Android (Glance): Today list with a filter, add button.
 - Location reminders on Android (geofence).
 - Templates: save a project as a template, create a project from a template (packing list, trip prep).
@@ -237,7 +238,7 @@ Auth: a per-device bearer token in Phase 1. Claude Code connects with `claude mc
 - Signup is invite-only. Registration endpoints are off unless an invite token is present. **Built:** the device token is the invite, so `POST /v1/passkeys/register/*` answers 401 without it.
 - CSRF on the cookie session, strict CSP, no third-party scripts, no external fonts in the app.
 - Attachments are stored on disk under the account, served with a signed URL, scanned for size and type. No SVG uploads.
-- Audit: every login, token creation and failed attempt goes into `activity` and is visible in the UI.
+- Audit: every login, token creation and failed attempt goes into `activity` and is visible in the UI. **Built, 2026-09-03.** A login, a failed login, a logout, a passkey added or removed, an invitation written or revoked, and a join all write one line. A security line carries the client address, and only the account it belongs to reads it. Token creation is the invitation and the join, because a device token is made by neither of the other two paths yet.
 - Backup files are encrypted at rest (Litestream to MinIO with server-side encryption, or age-encrypted snapshots).
 - Optional hardening later: forwardAuth in Traefik, Cloudflare Access, mTLS for the author's own devices (lugu already supports client certificates).
 

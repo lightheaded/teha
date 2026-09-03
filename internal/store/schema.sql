@@ -270,3 +270,43 @@ CREATE TABLE IF NOT EXISTS comment (
 
 CREATE INDEX IF NOT EXISTS comment_by_version ON comment(version);
 CREATE INDEX IF NOT EXISTS comment_by_task    ON comment(task_id, created_at);
+
+-- --- the activity log -------------------------------------------------------
+-- Who did what. §6.6 of docs/PLAN.md asks for one table that holds both the
+-- product history of a project and the audit trail of a login, and this is it.
+--
+-- It is NOT part of sync, and it carries no version. Every other table here is
+-- state that a client holds a copy of and works from offline. A log is neither:
+-- it only grows, an import writes one row per command, and no client needs a
+-- year of it in local storage to draw a list. So a client reads a page of it
+-- over GET /v1/activity when a person opens the view, and holds none of it.
+--
+-- seq is the order. Two rows can share a stamp, because a batch of twenty
+-- commands commits inside one millisecond, and a log that cannot say which
+-- came first is not a log.
+--
+-- project_id is how the row is scoped: an account reads a row of a project it
+-- can see. A row with no project is personal to account_id, which is what a
+-- login and a token are.
+--
+-- title holds the name the row had at that moment. The task itself can be
+-- deleted by the time somebody reads the log, and a log that says "deleted a
+-- task" without saying which one is no record at all.
+--
+-- addr is the client address, and it is filled for a security action only. A
+-- failed login that does not say where it came from cannot be acted on.
+CREATE TABLE IF NOT EXISTS activity (
+  seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+  at         TEXT NOT NULL,
+  account_id TEXT NOT NULL,
+  action     TEXT NOT NULL,
+  project_id TEXT,
+  task_id    TEXT,
+  title      TEXT NOT NULL DEFAULT '',
+  detail     TEXT NOT NULL DEFAULT '',
+  addr       TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS activity_by_project ON activity(project_id, seq DESC);
+CREATE INDEX IF NOT EXISTS activity_by_task    ON activity(task_id, seq DESC);
+CREATE INDEX IF NOT EXISTS activity_by_account ON activity(account_id, seq DESC);

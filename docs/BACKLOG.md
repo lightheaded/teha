@@ -22,9 +22,13 @@ the household: see [DECISIONS.md](DECISIONS.md) D-016 and D-017.*
   is no way at all to replace an invited person's token yet.
 - **No login notification.** §6.6 asks for one. Push now exists, so this is a
   small job that nobody has done.
-- **A login is not written to an activity log.** §6.6 asks for an audit trail
-  in `activity`, visible in the UI. There is no `activity` table. Every login,
-  every refusal, every enrolment and every invitation goes to the server log.
+- **Closed 2026-09-03: the activity log.** A login, a refused login, a logout,
+  a passkey added or removed, an invitation written or revoked, a join and a
+  share all write one line into `activity`, and the browser shows them. See
+  [DECISIONS.md](DECISIONS.md) D-023. What is still open here is the retention
+  of it: the table only grows, and nothing prunes it. An import writes one line
+  per command, so a 5 000-task import adds 5 000 rows. That costs a megabyte
+  and reaches no client, so it waits for a real file to grow uncomfortable.
 - **The raw attestation is not stored.** The library asks an implementer to
   keep it, so a credential can be checked against the FIDO metadata service
   later. This build runs no metadata service and asks for no attestation.

@@ -359,6 +359,7 @@ func (s *Server) handleRegisterFinish(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, "that passkey is enrolled already")
 		return
 	}
+	s.Store.Note(user.account.ID, store.ActionPasskeyAdd, row.Name, row.AAGUID, s.clientIP(r))
 	s.Log.Info("a passkey was enrolled", "name", row.Name, "aaguid", row.AAGUID)
 	writeJSON(w, http.StatusOK, map[string]any{"passkey": row})
 }
@@ -463,6 +464,10 @@ func (s *Server) handleLoginFinish(w http.ResponseWriter, r *http.Request) {
 	}
 	s.clearFailures(r)
 	s.issueSession(w, r)
+	// §6.6 of docs/PLAN.md: every login goes into the activity log, where the
+	// account owner can read it. The name of the passkey is the useful half,
+	// because it names the device.
+	s.Store.Note(owner.account.ID, store.ActionLogin, credentialName(s, cred.ID), "", s.clientIP(r))
 	s.Log.Info("a passkey signed in", "credential", encodeCredentialID(cred.ID))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
@@ -471,6 +476,9 @@ func (s *Server) handleLoginFinish(w http.ResponseWriter, r *http.Request) {
 // caller stays the same words for every cause.
 func (s *Server) failedLogin(r *http.Request, reason string, err error) {
 	s.recordFailure(r)
+	// The account is the owner's, because a refused assertion names nobody:
+	// that is the whole point of the refusal. The owner is who has to read it.
+	s.Store.Note(store.OwnerID, store.ActionLoginFailed, "", reason, s.clientIP(r))
 	s.Log.Warn("a passkey login failed", "reason", reason, "err", err, "ip", s.clientIP(r))
 }
 
@@ -493,10 +501,16 @@ func (s *Server) handlePasskeyList(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handlePasskeyDelete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	// Read the name before the row goes, or the log line says nothing.
+	name := credentialName(s, nil)
+	if row, err := s.Store.Credential(id); err == nil {
+		name = row.Name
+	}
 	if err := s.Store.DeleteCredential(id); err != nil {
 		writeErr(w, http.StatusNotFound, "no passkey carries that id")
 		return
 	}
+	s.Store.Note(store.OwnerID, store.ActionPasskeyDelete, name, "", s.clientIP(r))
 	s.Log.Info("a passkey was removed", "credential", id)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
@@ -504,7 +518,12 @@ func (s *Server) handlePasskeyDelete(w http.ResponseWriter, r *http.Request) {
 // --- the session ------------------------------------------------------------
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	// Read who is leaving before the session goes.
+	who := store.OwnerID
 	if c, err := r.Cookie(sessionCookieName); err == nil {
+		if a, err := s.Store.SessionAccount(c.Value); err == nil {
+			who = a.ID
+		}
 		if err := s.Store.DeleteSession(c.Value); err != nil {
 			s.Log.Error("cannot close the session", "err", err)
 		}
@@ -514,6 +533,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	// The browser forgets the device token as well. Logout means the screen in
 	// front of the user, so leaving the token behind would sign nobody out.
 	clearCookie(w, r, "teha_token")
+	s.Store.Note(who, store.ActionLogout, "", "", s.clientIP(r))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -800,4 +820,16 @@ func decodeCredentialID(id string) []byte {
 		return nil
 	}
 	return raw
+}
+
+// credentialName names a passkey for the log. A login knows the raw credential
+// id and not the row, so it reads the name back; a nil id means the caller has
+// its own name and only wants the fallback.
+func credentialName(s *Server, rawID []byte) string {
+	if rawID != nil {
+		if row, err := s.Store.Credential(encodeCredentialID(rawID)); err == nil && row.Name != "" {
+			return row.Name
+		}
+	}
+	return "Passkey"
 }

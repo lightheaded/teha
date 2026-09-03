@@ -3,7 +3,7 @@
 *2026-08-25. Built against [PLAN.md](PLAN.md) milestones M1 to M3, plus the
 Todoist importer, a command line client and the deployment files.*
 
-Tests: 206 Go cases and 193 web cases pass. `go vet` and `gofmt` are clean, and
+Tests: 216 Go cases and 201 web cases pass. `go vet` and `gofmt` are clean, and
 `go test -race ./...` is clean as well.
 
 The plan makes four risky promises. This build tests each one with running code,
@@ -397,6 +397,28 @@ one row and not the whole account.
 This is a change of plan, which named wa-sqlite in OPFS. The browser has no use
 for a query engine: the renderer walks the rows and the filter evaluator does
 too. See [DECISIONS.md](DECISIONS.md) D-022.
+
+## 15. A record of who did what
+
+Nothing recorded who changed a task, and §6.6 asked for the same table as the
+audit trail of a login. One `activity` table now holds both.
+
+Every command writes one line, in one place: right after the command succeeds
+and its savepoint is released, so a refused command leaves nothing. Every login,
+failed login, logout, passkey, invitation, join and share writes one as well.
+
+| The promise | How it is kept | The test |
+|---|---|---|
+| A line is as private as the row it describes | It carries the project, and an account reads a line of a project it can see | A second person reads the shared list and not the one beside it |
+| A personal line is nobody else's business | A login and a reminder carry no project, so only their own account reads them | The owner of the household cannot read the other person's login |
+| A refused command leaves no line | The line is written after the savepoint is released | A `task_update` against a missing task leaves the log empty |
+| The log can name what went away | The title of the row is copied into the line | A deleted task is still named in the log, and one button brings it back |
+| The reader is not shown a command type | The store writes the fact and the client writes the sentence | Every command type and every security action has words, and a raw type in the view fails the screenshot job |
+| A big log does not become a big client | It is outside sync, and read one page at a time | The route answers a page and a cursor, and says whether more exist |
+
+A deleted comment is logged and its words are not: a log nobody can delete is
+the wrong place for a line somebody deleted on purpose. See
+[DECISIONS.md](DECISIONS.md) D-023.
 
 ## What this build does not have
 

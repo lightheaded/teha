@@ -105,8 +105,11 @@ for (const scheme of ['light', 'dark']) {
 }
 
 // 4. A task open in the detail panel.
+//
+// DESKTOP_SHEET, because the panel grew a history block and the actions row at
+// the foot of it has to be in the picture.
 {
-  const { ctx, page } = await open(DESKTOP_TALL, 'light');
+  const { ctx, page } = await open(DESKTOP_SHEET, 'light');
   await page.click('#list .row .body');
   await page.waitForTimeout(400);
   await shot(page, 'detail');
@@ -265,6 +268,23 @@ for (const scheme of ['light', 'dark']) {
   if (!held.comments) throw new Error('the comments did not reach the local database');
   console.log(`the local copy holds ${held.tasks} tasks, ${held.projects} projects, `
     + `${held.comments} comments, at version ${held.version}`);
+  await ctx.close();
+}
+
+// 14. The activity log. The one screen that needs the network, so it also
+// proves that the route answers and that the words are wired.
+{
+  const { ctx, page } = await open(DESKTOP_SHEET, 'light');
+  await page.click('#histtoggle');
+  await page.waitForSelector('.aclist .acrow', { timeout: 10_000 });
+  const lines = await page.evaluate(() =>
+    [...document.querySelectorAll('.acrow')].map((r) => r.textContent.replace(/\s+/g, ' ').trim()));
+  if (!lines.length) throw new Error('the history sheet drew no lines');
+  // A line that reads as its own command type means the words are missing.
+  const raw = lines.filter((l) => /task_|project_|section_|comment_/.test(l));
+  if (raw.length) throw new Error(`the history shows a raw action: ${raw[0]}`);
+  console.log(`the history shows ${lines.length} lines`);
+  await shot(page, 'history');
   await ctx.close();
 }
 

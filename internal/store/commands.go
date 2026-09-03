@@ -210,6 +210,9 @@ func (s *Store) ApplyWithEvents(cmds []Command, accountID string) (int64, []Resu
 		if _, err := tx.Exec(`RELEASE one_command`); err != nil {
 			return 0, nil, nil, err
 		}
+		// The log line goes in after the savepoint is released, so a command
+		// that failed leaves none. See activity.go.
+		recordActivity(tx, c, id, now, act)
 		var v int64
 		if err := tx.QueryRow(`SELECT max(version) FROM change_log`).Scan(&v); err != nil {
 			return 0, nil, nil, err
@@ -318,6 +321,15 @@ func applyOne(tx *sql.Tx, c Command, now, today string, act actor, events *[]Eve
 			return "", err
 		}
 		return a.ID, nil
+	case "project_restore":
+		// The undo of a project_delete, and the reason the activity log can
+		// promise a restore for every row it shows deleted. A task inside the
+		// list was never marked deleted, so the list comes back whole.
+		var a IDArgs
+		if err := json.Unmarshal(c.Args, &a); err != nil {
+			return "", err
+		}
+		return a.ID, rowSet(tx, "project", a.ID, now, map[string]any{"deleted_at": nil})
 	case "reminder_add":
 		var a ReminderArgs
 		if err := json.Unmarshal(c.Args, &a); err != nil {
