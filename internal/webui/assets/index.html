@@ -43,8 +43,16 @@ header .st{margin-left:auto;font-size:12.5px;color:var(--ink-3);font-family:var(
 .qa .hint{margin-top:6px;font-size:12.5px;color:var(--ink-3);min-height:1.2em}
 .qa .hint b{color:var(--accent);font-weight:600}
 .list{flex:1;overflow-y:auto;padding:6px 10px 90px}
-.row{display:flex;gap:11px;align-items:flex-start;padding:9px 8px;border-radius:8px;cursor:default}
+.row{display:flex;gap:11px;align-items:flex-start;padding:9px 8px;border-radius:8px;cursor:default;position:relative}
 .row.sel{background:var(--bg-2);box-shadow:inset 2px 0 0 var(--accent)}
+/* A dragged row, and the line that says where it lands. The line is a pseudo
+   element and not a box shadow, because .sel and .mk already own the shadow of
+   a row and a drop must not take their bar away. */
+.row.held{opacity:.45}
+.row.dropbefore::after,.row.dropafter::after{content:"";position:absolute;left:6px;right:6px;
+  height:2px;border-radius:2px;background:var(--accent)}
+.row.dropbefore::after{top:-1px}
+.row.dropafter::after{bottom:-1px}
 /* A picked row is tinted and carries a solid bar, so a set of them reads as a
    block at a glance. The cursor row keeps its own thinner bar. */
 .row.mk{background:color-mix(in srgb,var(--accent) 13%,transparent);box-shadow:inset 3px 0 0 var(--accent)}
@@ -84,7 +92,9 @@ header .st{margin-left:auto;font-size:12.5px;color:var(--ink-3);font-family:var(
 .fab{position:fixed;right:18px;bottom:18px;width:52px;height:52px;border-radius:50%;border:none;background:var(--accent);color:var(--accent-ink);font-size:26px;box-shadow:0 6px 20px rgba(0,0,0,.25);cursor:pointer}
 @media (min-width:800px){.fab{display:none}}
 .keys{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px}
-.keys .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px;max-width:420px;width:100%}
+/* The card holds three key lists now, so it can be taller than a short
+   window. It scrolls inside itself rather than off the screen. */
+.keys .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px;max-width:420px;width:100%;max-height:100%;overflow-y:auto}
 .keys h3{margin:0 0 10px;font-size:16px}
 .keys dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0;font-size:14px}
 .keys dt{font-family:var(--mono);color:var(--accent)}

@@ -258,7 +258,7 @@ Read [Passkeys](#passkeys) for the enrolment and the rules the server applies.
 | Status | `v18` after a good sync. `3 to send` while the outbox holds commands. `offline · 3 queued` after a failed sync. |
 | Quick add box | One line makes one task. Press Enter. |
 | Hint line | What the parser found, as you type. |
-| Task list | Groups in this order: Overdue, Today, Tomorrow, then one group per date, then No date. |
+| Task list | Groups in this order: Overdue, Today, Tomorrow, then one group per date, then No date. Inside a group the priority sorts first, then your own order. |
 | Board button | In a project view only. It swaps the list for a board of columns, and back. |
 | Shop button | In a project view only. It swaps the list for shopping mode, and back. |
 | Calendar button | In every view. It swaps the list for a month or a week, and back. |
@@ -283,6 +283,38 @@ The built-in views are filter queries:
 
 A project entry in the sidebar runs `#<project name>`. A seventh view,
 **Assigned to me**, appears once a second person is in the household.
+
+### Order a day by hand
+
+Every list view takes a drag. Hold a task and drop it above or below another
+task, and the list keeps that order. `Shift+J` and `Shift+K` do the same move
+from the keyboard, and `u` puts it back.
+
+A list sorts by the day, then the priority, then your own order. A drag can
+therefore only move a task inside a **band**: the tasks of one day at one
+priority. A drop on a task of another day, or of another priority, does
+nothing, and the drop line does not appear over it. To leave a band, press `1`
+to `4` and change the priority.
+
+The **Overdue** heading gathers every past date under one word, so it holds
+more than one band. A task from Monday and a task from Tuesday cannot pass each
+other. Use **Reschedule** to bring the whole pile to one day, and then order
+it.
+
+- A new task goes to the end of the band it joins, and never above the tasks you
+  put in order.
+- A task keeps its place when you move it to another day. It arrives in the new
+  day where its own order puts it.
+- The order is one order per task, and the board reads the same one. A drag in
+  Today therefore also moves the card inside its column on the board. See
+  [DECISIONS.md](DECISIONS.md) D-024 for why one column holds both.
+- The server and the phone sort a list the same way, so an order you set here
+  is the order they show. Neither of them can set one yet. The phone can only
+  read it, and the **Only the browser can order a day by hand** entry in
+  [BACKLOG.md](BACKLOG.md) says so.
+
+A drag needs a pointer. On a touch screen, use `Shift+J` and `Shift+K` with a
+keyboard, or set the priority to say what comes first.
 
 ### The calendar layout
 
@@ -373,8 +405,11 @@ first column. **Undo** puts the heading back and files the tasks into it again.
 A section belongs to one project. A task therefore carries its project and its
 section in one command, so the pair can never disagree.
 
-The list order is the due date, then the priority, then the title. A task with
-no date goes last.
+The list order is the due date, then the priority, then your own order, then
+the title. A task with no date goes last. A board reads the same order key, so
+a drag here also moves the row inside its day on a list, and a drag on a list
+moves the card inside its column here. D-024 in [DECISIONS.md](DECISIONS.md)
+says why one key does both jobs.
 
 ### Shopping mode
 
@@ -515,7 +550,7 @@ it loses focus. The sheet never waits for the server.
 | `[`, `]` | On the calendar: the period before and after. |
 | `h`, `l`, arrow left, arrow right | On the board: move to the column on the left or the right. |
 | `Shift+H`, `Shift+L` | On the board: carry this task one column left or right. |
-| `Shift+J`, `Shift+K` | On the board: move this task down or up inside its column. |
+| `Shift+J`, `Shift+K` | Move this task down or up. On a list: inside its day and priority. On the board: inside its column. |
 | `<`, `>` | On the board: move this column left or right. |
 | `n` | On the board: move the cursor into the Add a section field. |
 | Command or Control, and click | Pick one task. |
@@ -1431,7 +1466,7 @@ Nothing else uses them.
 creation date. Every other term of the grammar answers the same everywhere.
 
 Next, in order: the exit tests, attachments, an hour grid on the week calendar,
-and an order key that a client writes. [BACKLOG.md](BACKLOG.md) holds every
+and an order key that the phone writes. [BACKLOG.md](BACKLOG.md) holds every
 knowingly unfinished thing with its reason.
 
 The real Todoist import already ran, on 2026-08-25: 17 projects, 250 tasks, 63

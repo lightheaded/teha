@@ -70,8 +70,9 @@ runs in about 3 seconds, and a full run of the properties at `-count=20` takes
 
 The fractional index that §6.1 promises did not exist: every write path put the
 literal `m` into `order_key`. It is now the `order` package with its own
-property test, and D-013 records the choice. No client calls it yet, so
-[BACKLOG.md](BACKLOG.md) carries that.
+property test, and D-013 records the choice. No client calls it yet: the web
+app renumbers a short band instead, per D-024, so [BACKLOG.md](BACKLOG.md)
+carries the rest.
 
 ## 3. A filter language that means one thing everywhere
 
@@ -581,10 +582,12 @@ browser reaches.*
 3. **The hour grid on the week calendar.** The last layout the plan names that
    this build draws differently: a week is seven day columns, so a task with a
    time sorts to the top of its day. Time blocking in Phase 3 needs the grid.
-4. **Order keys in the clients.** The `order` package exists with a property
-   test, and no client calls it. All three write the literal `m`, so a list
-   falls back to its secondary sorts and a drag cannot be saved. It is the
-   oldest open shortcut in this build.
+4. **Order keys on the phone.** The browser can order a day by hand since
+   2026-09-04: a drag or `Shift+J` moves a task inside its band of one day at
+   one priority, and D-024 records the shape. The phone draws that order and
+   cannot set one, and neither can the MCP tools. The `order` package still has
+   no caller, because a renumber of a short run needs no key between two
+   neighbours.
 5. **The drill against the real bucket, on a schedule.** The restore is
    rehearsed on a laptop and it passes. Nobody has restored from the bucket the
    deployment writes to, which is the run that also proves the credentials, and

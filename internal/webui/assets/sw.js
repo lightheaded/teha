@@ -3,12 +3,12 @@
 // A small offline shell. The app data lives in IndexedDB, which the app reads
 // itself, so the worker only needs to keep the shell reachable with no
 // network.
-const CACHE = 'teha-shell-v8';
+const CACHE = 'teha-shell-v9';
 // Every file the app needs for a cold start with no network. parse.js and
 // passkey.js are modules that app.js imports, so a missing entry here breaks
 // the offline start.
 const SHELL = ['/', '/app.js', '/parse.js', '/passkey.js', '/md.js', '/filter.js', '/db.js', '/activity.js',
-  '/manifest.webmanifest', '/icon.svg'];
+  '/band.js', '/manifest.webmanifest', '/icon.svg'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

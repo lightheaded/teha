@@ -202,14 +202,16 @@ Added 2026-08-27 with Web Push (D-003, D-010, D-011).
 
 ## Sync and the store
 
-- **Three clients still write the literal `m` into `order_key`.** The
-  fractional index now exists as the `order` package with a property test, and
-  D-013 in [DECISIONS.md](DECISIONS.md) records why. No client calls it: the
-  web app, the Android repository and the store all write `m`, and the importer
-  writes a fixed-width number of the Todoist child order. Until a client adopts
-  the package, a list falls back to its secondary sort keys and a drag cannot be
-  saved. Adopting it is client work in three places, so it waits for the next
-  client milestone.
+- **No client calls the `order` package.** The fractional index exists as the
+  `order` package with a property test, and D-013 in
+  [DECISIONS.md](DECISIONS.md) records why. Nothing calls it. The web app
+  renumbers a band of rows with the fixed-width keys of
+  `internal/webui/assets/band.js`, which is the form the importer and the board
+  already write, and D-024 says why a renumber beats `order.Between` for a band
+  whose rows all share one key. The Android repository and the store still
+  write the literal `m`. The package earns its place when a client has to
+  insert one row between two neighbours with no renumber, which is a list long
+  enough that one command per row is too many.
 
 - **The fractional index only halves a gap, so a key grows.** About one
   character for every six insertions into the same point: 2 000 insertions into
@@ -413,12 +415,25 @@ it travels with the next change that needs one.
 
 ---
 
-## The phone keeps no order inside a day
+## Only the browser can order a day by hand
 
-A view sorts by the day, then the priority, then the order key. The server holds
-a fractional order key per project, and the phone never edits it, so a task
-cannot be dragged into place on the phone. Nothing is lost, and the browser
-cannot reorder either.
+A view sorts by the day, then the priority, then the order key, on the server,
+in the browser and on the phone. The browser can now set that key: a drag or
+`Shift+J` moves a task inside its band, and D-024 in
+[DECISIONS.md](DECISIONS.md) records the shape. The phone reads the order and
+draws it, and it cannot set one. Neither can the MCP tools, so the agent can
+name a day for a task but not a place inside it.
+
+**What the phone needs.** A long press already opens the five bulk actions, so
+the gesture is taken. A drag on a card, or two entries in that menu, plus the
+band arithmetic of `band.js` in Kotlin, and one `task_update` per changed row
+through the outbox that already exists. No schema change: the column is in
+Room.
+
+**What a task added on the phone does today.** It carries the literal `m`,
+which sorts before every key a drag writes, so it arrives at the top of its band
+in the browser. `endKey` in `app.js` is the answer for the browser, and the
+phone needs the same three lines.
 
 ## The desktop shell (M5)
 

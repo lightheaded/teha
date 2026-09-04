@@ -11,7 +11,7 @@ the data.
 | | |
 |---|---|
 | ![The Today view](docs/screenshots/today-light.png) | ![The same view in the dark theme](docs/screenshots/today-dark.png) |
-| **Today.** Overdue first, then the day groups. The sidebar counts every view. **Reschedule** moves the whole overdue pile to one day, and `Shift+T` does it from the keyboard. | **The dark theme.** The app follows the system setting. |
+| **Today.** Overdue first, then the day groups. The sidebar counts every view. **Reschedule** moves the whole overdue pile to one day, and `Shift+T` does it from the keyboard. Drag a task to order the day by hand, or press `Shift+J`. | **The dark theme.** The app follows the system setting. |
 
 ![Quick add, with the parse hint](docs/screenshots/quick-add.png)
 
@@ -167,6 +167,9 @@ Both values default to the request host, so a run on `localhost` needs neither.
 - **Sections and a board.** A project holds sections. `b` swaps the list for a
   board of columns, and the choice survives a reload. Drag a card to another
   column, or drive the whole board from the keyboard.
+- **A day ordered by hand.** Drag a task above or below another task of the
+  same day and priority, or press `Shift+J` and `Shift+K`. The order is one
+  column in the database, so the server and the phone draw the same day.
 - **A calendar.** `c` swaps any view for a month or a week. Drag a task to
   another day, or drag one out of the strip of undated tasks to give it a day.
 - **Markdown in a note,** with a link that opens. Paste a URL over selected

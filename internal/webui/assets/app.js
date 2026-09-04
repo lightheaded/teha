@@ -62,6 +62,7 @@ import * as md from './md.js';
 import * as flt from './filter.js';
 import * as db from './db.js';
 import * as act from './activity.js';
+import * as bnd from './band.js';
 
 const $ = (id) => document.getElementById(id);
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2));
@@ -286,10 +287,15 @@ function addFromText(text) {
     const at = new Date(todayISO() + 'T' + p.remindAt);
     t.due_date = at.getTime() > Date.now() ? todayISO() : plusDays(1);
   }
+  // The day is settled now, so the task can take its place in that day. A new
+  // task goes to the end of the band it joins, not above the rows a person
+  // arranged by hand. See endKey.
+  t.order_key = endKey(t.due_date, t.priority);
   S.tasks.set(id, t);
   queue('task_add', {
     id, title: p.title,
     project_id: t.project_id,
+    order_key: t.order_key === 'm' ? undefined : t.order_key,
     due_date: t.due_date || undefined,
     due_time: p.time || undefined,
     priority: p.priority || undefined,
@@ -747,13 +753,25 @@ function visible() {
     return cal.days.flatMap((d) => d.tasks).concat(cal.undated);
   }
   const out = queryRows();
-  out.sort((a, b) => {
-    const ad = a.due_date || '9999', bd = b.due_date || '9999';
-    if (ad !== bd) return ad < bd ? -1 : 1;
-    if ((a.priority || 4) !== (b.priority || 4)) return (a.priority || 4) - (b.priority || 4);
-    return (a.title || '').localeCompare(b.title || '');
-  });
+  out.sort(listOrder);
   return out;
+}
+
+// listOrder is the sort of a list view: the day, then the priority, then the
+// manual order key, then the title. The first three keys are the ORDER BY of
+// GET /v1/tasks in internal/store/store.go and of the Room query in
+// TehaRepository, so a person who arranges a day on one client sees the same
+// order on the other two.
+//
+// The title only breaks a tie between two equal keys, which is what a row that
+// nobody dragged still has. See band.js for what a drag may move.
+function listOrder(a, b) {
+  const ad = a.due_date || '9999', bd = b.due_date || '9999';
+  if (ad !== bd) return ad < bd ? -1 : 1;
+  if ((a.priority || 4) !== (b.priority || 4)) return (a.priority || 4) - (b.priority || 4);
+  const ak = a.order_key || 'm', bk = b.order_key || 'm';
+  if (ak !== bk) return ak < bk ? -1 : 1;
+  return (a.title || '').localeCompare(b.title || '');
 }
 
 // --- render -----------------------------------------------------------------
@@ -859,6 +877,9 @@ function render() {
     };
     el.onclick = () => { S.sel = i; render(); };
   });
+  // The plain list takes a drag on a row, to order the day by hand. The other
+  // three layouts each wire their own.
+  if (listDrag() && rows.length) wireRowDrag(list, rows);
   const sel = list.querySelector('.row.sel');
   if (sel) sel.scrollIntoView({ block: 'nearest' });
 
@@ -1011,6 +1032,156 @@ function dueLabel(date, time) {
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// --- manual order in a list -------------------------------------------------
+// Today is the view a person reads every morning, so it is the view that has
+// to take a hand order. The board could already do it and the list could not,
+// which made the board the only place to arrange a day, and a day spans more
+// than one project.
+//
+// listOrder above sorts by the day, then the priority, then the order key. A
+// drag may therefore only move a row inside a band: the rows of one day at one
+// priority. band.js says why, and holds the arithmetic. Press 1 to 4 to leave
+// a band.
+
+// bandOf names the band of one row, for band.js. The name holds the two sort
+// keys above the order key, and nothing else: the day and the priority. Two
+// rows of one band therefore always stand next to each other, because
+// listOrder puts them there.
+//
+// It is not the heading on the screen. The Overdue heading gathers every past
+// date under one word, and two of those dates are two bands.
+function bandOf(t) {
+  return (t.due_date || '') + ' ' + (t.priority || 4);
+}
+
+// endKey answers the order key a new task needs, so that it lands at the end
+// of the rows it will sit among: the open tasks of the same day at the same
+// priority. Without it a new task would stand above every row a person
+// dragged, because the default key sorts before every key a drag writes.
+//
+// A day that nobody arranged carries the default key on every row. The new
+// task then keeps that key too, so a list that nobody dragged reads exactly as
+// it read before.
+function endKey(due, priority) {
+  let max = '';
+  S.tasks.forEach((t) => {
+    if (t.state !== 'open') return;
+    if ((t.due_date || '') !== (due || '')) return;
+    if ((t.priority || 4) !== (priority || 4)) return;
+    const k = t.order_key || 'm';
+    if (k > max) max = k;
+  });
+  return bnd.after(max) || 'm';
+}
+
+// listDrag reports whether the view on screen is the plain list. The board,
+// the calendar and shopping mode each draw their own order and wire their own
+// drag, and a broken filter draws a sentence and no rows at all.
+function listDrag() {
+  return !boardOn() && !shopOn() && !calendarOn() && !S.filterError;
+}
+
+// moveRow puts one row of the list before another and renumbers the band they
+// share. Both indexes are indexes of the list on screen. A `to` past the last
+// row of the band means the end of it.
+//
+// One task_update per changed row, which is the shape the board already
+// writes: a command per row replays the same way from an outbox tomorrow.
+function moveRow(rows, at, to) {
+  const band = bnd.bandAt(rows, at, bandOf);
+  if (!band) return;
+  const moved = rows[at];
+  const next = bnd.reorder(band.rows, at - band.from, to - band.from);
+  const writes = bnd.rekey(next);
+  if (!writes.length) return;
+  // The undo puts back every key this move changed, and not only the key of
+  // the row that moved. A row that never carried a key has nowhere else to go
+  // back to, so the whole band has to travel together.
+  const before = writes.map((w) => ({ id: w.id, order: S.tasks.get(w.id).order_key || 'm' }));
+  writes.forEach((w) => {
+    const t = S.tasks.get(w.id);
+    if (!t) return;
+    t.order_key = w.order_key;
+    queue('task_update', { id: w.id, order_key: w.order_key });
+  });
+  toast('Moved', () => {
+    before.forEach((b) => {
+      const t = S.tasks.get(b.id);
+      if (!t || t.order_key === b.order) return;
+      t.order_key = b.order;
+      queue('task_update', { id: b.id, order_key: b.order });
+    });
+    render();
+  });
+  keepCursorOn(moved);
+}
+
+// nudgeRow is the keyboard form of a drag: one row, one place, inside the
+// band. Shift+J and Shift+K are the pair the board already uses.
+function nudgeRow(rows, dir) {
+  const at = S.sel;
+  const band = bnd.bandAt(rows, at, bandOf);
+  if (!band) return;
+  const next = at + dir;
+  if (next < band.from || next > band.to) {
+    $('hint').textContent = dir > 0
+      ? 'That is the last task of this day at this priority. Press 1 to 4 to change the priority.'
+      : 'That is the first task of this day at this priority. Press 1 to 4 to change the priority.';
+    return;
+  }
+  // A move down goes before the row after the neighbour, because "before the
+  // neighbour" is where the row already stands.
+  moveRow(rows, at, dir > 0 ? at + 2 : at - 1);
+}
+
+// wireRowDrag makes every row of the list draggable inside its own band. A row
+// of another band takes no drop, so a drag can never change a priority or a
+// day by accident. A line above or below the row under the pointer says where
+// the drop lands.
+function wireRowDrag(list, rows) {
+  const els = [...list.querySelectorAll('.row')];
+  const clear = () => els.forEach((el) => el.classList.remove('dropbefore', 'dropafter'));
+  els.forEach((el, i) => {
+    el.draggable = true;
+    el.ondragstart = (e) => {
+      S.drag = { kind: 'row', at: i };
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', rows[i].id);
+      el.classList.add('held');
+    };
+    el.ondragend = () => { S.drag = null; el.classList.remove('held'); clear(); };
+    // A drop lands above the row under the pointer, or below it, whichever
+    // half the pointer is in. That is the one rule a pointer user expects.
+    const below = (e) => {
+      const r = el.getBoundingClientRect();
+      return e.clientY > r.top + r.height / 2;
+    };
+    const inBand = () => {
+      const d = S.drag;
+      if (!d || d.kind !== 'row') return null;
+      const band = bnd.bandAt(rows, d.at, bandOf);
+      if (!band || i < band.from || i > band.to) return null;
+      return d;
+    };
+    el.ondragover = (e) => {
+      if (!inBand()) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      clear();
+      el.classList.add(below(e) ? 'dropafter' : 'dropbefore');
+    };
+    el.ondragleave = () => el.classList.remove('dropbefore', 'dropafter');
+    el.ondrop = (e) => {
+      const d = inBand();
+      S.drag = null;
+      clear();
+      if (!d) return;
+      e.preventDefault();
+      moveRow(rows, d.at, i + (below(e) ? 1 : 0));
+    };
+  });
 }
 
 // --- task detail ------------------------------------------------------------
@@ -1947,14 +2118,6 @@ function boardOrder(a, b) {
   return (a.title || '').localeCompare(b.title || '');
 }
 
-// orderKeyAt spaces the keys ten apart, in the fixed-width text form that the
-// importer also writes. A drop renumbers the whole column instead of finding a
-// key between two neighbours: a column holds a few rows, and one command per
-// row is the shape that D-008 asks for.
-function orderKeyAt(i) {
-  return 'm' + String((i + 1) * 10).padStart(6, '0');
-}
-
 // columnOf finds the column and the row of one flat index.
 function columnOf(cols, sel) {
   let seen = 0;
@@ -2132,7 +2295,7 @@ function moveTaskTo(t, sectionId, index) {
   else delete t.section_id;
   queue('task_move', { id: t.id, project_id: p.id, section_id: sectionId || '' });
   order.forEach((x, i) => {
-    const key = orderKeyAt(i);
+    const key = bnd.keyAt(i);
     if (x.order_key === key) return;
     x.order_key = key;
     queue('task_update', { id: x.id, order_key: key });
@@ -2190,7 +2353,7 @@ function reorderSection(id, toIndex) {
   secs.splice(Math.min(Math.max(toIndex, 0), secs.length), 0, moved);
   let changed = 0;
   secs.forEach((s, i) => {
-    const key = orderKeyAt(i);
+    const key = bnd.keyAt(i);
     if (s.order_key === key) return;
     s.order_key = key;
     queue('section_reorder', { id: s.id, order_key: key });
@@ -2220,7 +2383,7 @@ function addSection(p, rawName) {
   const name = (rawName || '').trim();
   if (!p || !name) return;
   const id = newId('s');
-  const order = orderKeyAt(projectSections(p.id).length);
+  const order = bnd.keyAt(projectSections(p.id).length);
   S.sections.set(id, { id, project_id: p.id, name, order_key: order, v: 0 });
   queue('section_add', { id, project_id: p.id, name, order_key: order });
   render();
@@ -2830,6 +2993,14 @@ function wire() {
     if (e.key === 'c') { toggleCalendar(); return; }
     if (e.key === 'S') { toggleShop(); return; }
     if (boardOn() && boardKey(e, cur)) return;
+    // Shift+J and Shift+K move the row inside its band, the same pair the
+    // board uses to move a card inside its column. A browser reports the upper
+    // case letter while shift is down, and a synthesised event can carry the
+    // lower case one, so both are read.
+    if (listDrag()) {
+      if (e.key === 'J' || (e.key === 'j' && e.shiftKey)) { nudgeRow(rows, 1); return; }
+      if (e.key === 'K' || (e.key === 'k' && e.shiftKey)) { nudgeRow(rows, -1); return; }
+    }
     if (calendarOn()) {
       if (e.key === '[') { calStep(-1); return; }
       if (e.key === ']') { calStep(1); return; }
@@ -2878,6 +3049,7 @@ function showKeys() {
     <dt>b / c / S</dt><dd>board layout, calendar layout, shopping mode</dd>
     <dt>[ / ]</dt><dd>the period before and after, in the calendar</dd>
     <dt>j / k</dt><dd>move down and up</dd>
+    <dt>J / K</dt><dd>move this task down or up inside its day and priority</dd>
     <dt>x</dt><dd>complete the selected task</dd>
     <dt>1..4</dt><dd>set priority</dd>
     <dt>t / m / w</dt><dd>due today, tomorrow, next week</dd>
@@ -2894,6 +3066,11 @@ function showKeys() {
     <dt>g</dt><dd>go to Today</dd>
     <dt>,</dt><dd>settings and notifications</dd>
     <dt>?</dt><dd>this list</dd></dl>
+    <h3>Order a day by hand</h3><dl>
+    <dt>drag</dt><dd>a task above or below another task of the same day and priority</dd>
+    <dt>J / K</dt><dd>the same move, from the keyboard</dd>
+    <dt>1..4</dt><dd>change the priority, to leave the band a drag can move inside</dd>
+    <dt>u</dt><dd>put the order back</dd></dl>
     <h3>Board layout</h3><dl>
     <dt>b</dt><dd>swap the list and the board, in a project view</dd>
     <dt>h / l</dt><dd>move to the column on the left or the right</dd>

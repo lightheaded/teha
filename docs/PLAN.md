@@ -75,6 +75,11 @@ Phase 1 is solo daily driving with import from Todoist. Phase 2 makes it a house
 - Task detail: title, description (Markdown), sub-tasks, labels, priority, due, recurrence, comments.
   - **Markdown runs since 2026-08-31.** A note reads as Markdown and edits as text, a task title carries the inline part, and a URL pasted over selected text becomes a link. `parser-fixtures/markdown.json` is the contract. **A comment is a row since 2026-09-02**, it renders as Markdown as well, and only the author edits their own line.
 - Drag to reorder and indent. Multi-select with bulk actions. Undo toast.
+  - **A list reorders since 2026-09-04.** A drag, or `Shift+J` and `Shift+K`,
+    moves a task inside its band of one day at one priority, because the sort
+    reads the day and the priority above the order key. D-024 records why one
+    order key serves both a list and a board. Indent is still the parent field
+    and no gesture.
 - Keyboard: `q` quick add, `Cmd+K` command menu with every command, `j`/`k` move, `e` edit, `1`..`4` priority, `t` today, `w` next week, `x` select, `Enter` complete. Keyboard reference on `?`.
 - Offline: the client holds the account in SQLite (wa-sqlite in OPFS) or IndexedDB, renders from it, syncs later. Installable PWA. Works on the partner's phone in any browser while native apps mature.
 - Light and dark themes. Accent colors per project.

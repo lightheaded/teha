@@ -948,3 +948,74 @@ about 5 000 rows: nothing for SQLite, and nothing that reaches a client.
 
 **Reverses if:** a client needs the log offline, which is the point at which the
 rows have to enter sync and the retention question has to be answered.
+
+## D-024 — A list orders a day inside a priority band, on the one order key
+
+**2026-09-04.** Every list view takes a drag. The list sorts by the day, then
+the priority, then `order_key`, so a drag moves a task inside a **band**: the
+tasks of one day at one priority. A drop renumbers the band and writes one
+`task_update` per changed row. `internal/webui/assets/band.js` holds the
+arithmetic.
+
+**Why the band.** `ORDER BY (due_date IS NULL), due_date, priority, order_key`
+is the sort in `internal/store/store.go`, and `TehaRepository.tasks` writes the
+same one into Room. Three clients therefore draw a view the same way, and the
+web app was the odd one out: it read the day and the priority and ignored the
+key. The web sort now reads the key as well, so the three agree. The key stays
+the last of the four keys, and a drag can change only the key. A band is
+therefore what a drag can move inside. Press `1` to `4` to leave a band.
+
+The alternative was to put the key above the priority in the sort. That is a
+change to all three clients, and it takes p1 off the top of a day, which is
+what a priority is for.
+
+**Why one key and not two.** Todoist holds two orders: `child_order` for a
+project, and `day_orders` for a date view. A task here has one `order_key`, so
+a drag in Today also moves the card inside its column on the board, and two
+tasks of one project arranged in two different days can end up with one key. A
+board order then falls back to the day and the title, which is a real cost and
+the reason to write it down.
+
+This build refused the second column on price, not on principle. It is a
+schema change: a column and a migration on the server, a field in the delta, a
+Room migration on the phone and one full pull. D-021 already refused a second
+table for a heading that the section table can hold, and the same argument
+holds here while one order is enough to arrange a day.
+
+**Why a renumber and not `order.Between`.** The `order` package from D-013
+finds a key between two neighbours, and a band whose rows all carry the default
+key `m` has no gap between them to find. A renumber needs no gap: it gives the
+band the keys `m000010`, `m000020` and so on, which is the form
+`internal/todoist/import.go` already writes and the form the board already
+renumbers a column with. A band holds a few rows, so one command per row is the
+shape D-008 asks for, and an outbox replays it tomorrow to the same order.
+
+**The band is the two sort keys, not the heading.** `bandOf` reads the due date
+and the priority. The Overdue heading gathers every past date under one word,
+so it holds more than one band, and a task from Monday cannot pass a task from
+Tuesday. **Reschedule** already moves that pile to one day, which is the
+gesture for it.
+
+**The cost of a renumber.** The first drag in a band gives every row of it a
+key, so a band of 80 rows costs 80 commands. `/v1/sync` takes 200 per request
+and the client drains the rest, so a long band works, and the No date view is
+the one that can hold such a band. Every later drag costs only the rows between
+the two positions, because `rekey` skips a row whose key is already right.
+
+**A new task goes to the end of the band.** The default key `m` sorts before
+every key a drag writes. Without a key of its own, a new task therefore stands
+above the rows a person just put in order. `endKey` in `app.js` reads the
+largest key of the band
+the task will join and steps past it. A band that nobody arranged carries `m` on
+every row, and a new task keeps `m` too, so a list nobody dragged reads exactly
+as it read before. The desktop quick add panel sends its line to the same
+function, so it gets the same answer.
+
+**What still writes `m`.** The phone, the MCP tools and the store default. Each
+one can read an order and none can set one, which is the state D-013 predicted
+and [BACKLOG.md](BACKLOG.md) records. A task added on the phone therefore
+arrives at the top of its band, and a drag on the mac moves it down.
+
+**Reverses if:** a person wants a board order and a day order to survive each
+other. That is the second column, and Todoist's `day_orders` is the shape to
+copy.
