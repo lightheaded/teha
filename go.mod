@@ -1,6 +1,6 @@
 module github.com/lightheaded/teha
 
-go 1.26
+go 1.26.10
 
 require (
 	github.com/SherClockHolmes/webpush-go v1.4.0

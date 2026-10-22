@@ -8,7 +8,11 @@
 #   docker build -t teha:dev .
 #   docker build --build-arg VERSION=0.1.0 -t teha:0.1.0 .
 
-FROM golang:1.26-alpine AS build
+# Both base images are pinned by tag and digest. Go 1.26.10 carries the
+# crypto/x509 denylist for the compromised eMudhra intermediate CAs
+# (CVE-2026-111943). The debian13 runtime carries the fixed CA store
+# (ca-certificates 20250419+deb13u1).
+FROM golang:1.26.10-alpine3.24@sha256:5cb67f19c5e7994dcb80c074f7cfca8aeeada45bbdca035f73df269cefdcce61 AS build
 
 WORKDIR /src
 
@@ -70,7 +74,7 @@ RUN cd /src/healthcheck && go mod init healthcheck >/dev/null 2>&1 \
 # so the directory must arrive from this stage.
 RUN mkdir -p /out/data && chown 65532:65532 /out/data
 
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian13:nonroot@sha256:d62067879de890a1def9da0e7766b7d20810a5e5555cef8506b752437d7a3e88
 
 ARG VERSION=dev
 LABEL org.opencontainers.image.title="teha" \
